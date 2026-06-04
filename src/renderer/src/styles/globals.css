@@ -1,0 +1,214 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Dark Theme (default) ─── */
+:root,
+.dark {
+  --bg-app: #0d1117;
+  --bg-surface: #161b22;
+  --bg-elevated: #1c2333;
+  --bg-input: #21262d;
+  --bg-hover: #1f2937;
+  --bg-active: #2d333b;
+
+  --border: #30363d;
+  --border-subtle: #21262d;
+
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+  --text-link: #58a6ff;
+
+  --accent: #58a6ff;
+  --accent-hover: #79c0ff;
+  --accent-subtle: rgba(88, 166, 255, 0.1);
+
+  --success: #3fb950;
+  --success-subtle: rgba(63, 185, 80, 0.1);
+  --warning: #d29922;
+  --warning-subtle: rgba(210, 153, 34, 0.1);
+  --error: #f85149;
+  --error-subtle: rgba(248, 81, 73, 0.1);
+  --purple: #bc8cff;
+
+  --titlebar-bg: #010409;
+  --sidebar-bg: #0d1117;
+  --tabbar-bg: #010409;
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: #30363d;
+  --scrollbar-thumb-hover: #484f58;
+
+  --terminal-bg: #0d1117;
+  --terminal-fg: #c9d1d9;
+  --terminal-selection: rgba(88, 166, 255, 0.3);
+  --terminal-cursor: #58a6ff;
+}
+
+/* ─── Light Theme ─── */
+.light {
+  --bg-app: #f6f8fa;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f3f4f6;
+  --bg-input: #f6f8fa;
+  --bg-hover: #f0f3f6;
+  --bg-active: #e8ecf0;
+
+  --border: #d0d7de;
+  --border-subtle: #e8ecf0;
+
+  --text-primary: #1f2328;
+  --text-secondary: #656d76;
+  --text-muted: #9ca3af;
+  --text-link: #0969da;
+
+  --accent: #0969da;
+  --accent-hover: #1a7fe3;
+  --accent-subtle: rgba(9, 105, 218, 0.08);
+
+  --success: #1a7f37;
+  --success-subtle: rgba(26, 127, 55, 0.08);
+  --warning: #9a6700;
+  --warning-subtle: rgba(154, 103, 0, 0.08);
+  --error: #cf222e;
+  --error-subtle: rgba(207, 34, 46, 0.08);
+  --purple: #8250df;
+
+  --titlebar-bg: #f6f8fa;
+  --sidebar-bg: #f6f8fa;
+  --tabbar-bg: #f0f3f6;
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: #d0d7de;
+  --scrollbar-thumb-hover: #b0b8c1;
+
+  --terminal-bg: #ffffff;
+  --terminal-fg: #1f2328;
+  --terminal-selection: rgba(9, 105, 218, 0.2);
+  --terminal-cursor: #0969da;
+}
+
+/* ─── Base ─── */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* ─── Selection ─── */
+::selection {
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+}
+
+/* ─── Focus ─── */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── Input base ─── */
+input, textarea, select {
+  user-select: text;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-muted);
+}
+
+/* ─── Button base ─── */
+button {
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  border: none;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+/* ─── Utility: no-drag vs drag ─── */
+.drag { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+/* ─── Animations ─── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in { animation: fadeIn 0.2s ease-out; }
+.animate-spin { animation: spin 0.8s linear infinite; }
+
+/* ─── Terminal overrides ─── */
+.xterm {
+  height: 100%;
+  padding: 8px;
+}
+
+.xterm-viewport::-webkit-scrollbar { width: 6px; }
+.xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+
+/* ─── Status badge ─── */
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.connected { background: var(--success); }
+.status-dot.connecting { background: var(--warning); animation: pulse 1.5s ease-in-out infinite; }
+.status-dot.disconnected { background: var(--text-muted); }
+.status-dot.error { background: var(--error); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
