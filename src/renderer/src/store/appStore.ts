@@ -43,6 +43,8 @@ interface AppState {
 
 const defaultSettings: AppSettings = {
   theme: 'dark',
+  themeId: 'navy',
+  uiFontSize: 14,
   fontSize: 14,
   fontFamily: 'JetBrains Mono, Cascadia Code, monospace',
   cursorStyle: 'block',

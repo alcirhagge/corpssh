@@ -13,6 +13,7 @@ import ExportPanel from './components/Export/ExportPanel'
 import SettingsPanel from './components/Dialogs/SettingsPanel'
 import UpdateNotification from './components/Layout/UpdateNotification'
 import type { Server, Tab, LogEntry } from './types'
+import { applyTheme, getThemeBase } from './themes'
 
 export default function App() {
   const {
@@ -35,12 +36,11 @@ export default function App() {
       setGroups(groupList)
       setKeys(keyList)
       setSettings(settingsData)
-      const t = settingsData.theme === 'system'
-        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-        : settingsData.theme
-      setTheme(t as 'dark' | 'light')
-      document.documentElement.classList.remove('dark', 'light')
-      document.documentElement.classList.add(t)
+      const themeId = settingsData.themeId ?? 'navy'
+      const base = getThemeBase(themeId)
+      setTheme(base)
+      applyTheme(themeId)
+      document.documentElement.style.setProperty('--ui-font-size', `${settingsData.uiFontSize ?? 14}px`)
     }
     load()
 

@@ -18,19 +18,6 @@ export default function Sidebar() {
       className="flex flex-col h-full select-none"
       style={{ width: 168, background: 'var(--sidebar-bg)', borderRight: '1px solid var(--border-subtle)', flexShrink: 0 }}
     >
-      {/* Logo strip */}
-      <div className="flex items-center gap-2.5 px-4 py-3.5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-        <div
-          className="flex items-center justify-center rounded-lg"
-          style={{ width: 22, height: 22, background: 'var(--accent)', flexShrink: 0 }}
-        >
-          <Terminal size={12} color="#fff" strokeWidth={2.5} />
-        </div>
-        <span className="text-xs font-bold tracking-wide" style={{ color: 'var(--text-primary)', letterSpacing: '0.04em' }}>
-          CorpSSH
-        </span>
-      </div>
-
       {/* Nav */}
       <div className="flex flex-col gap-0.5 p-2 flex-1">
         {NAV_ITEMS.map((item) => (
@@ -84,7 +71,7 @@ function NavItem({ icon, label, active, badge, onClick }: {
         background: active ? 'var(--bg-active)' : hovered ? 'var(--bg-hover)' : 'transparent',
         color: active ? 'var(--text-primary)' : hovered ? 'var(--text-primary)' : 'var(--text-secondary)',
         fontWeight: active ? 600 : 400,
-        fontSize: 12,
+        fontSize: 13,
         textAlign: 'left',
         transition: 'background 0.12s, color 0.12s'
       }}

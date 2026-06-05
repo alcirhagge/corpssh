@@ -42,7 +42,7 @@ export default function ExportPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full p-6" style={{ background: 'var(--bg-app)' }}>
+    <div className="flex flex-col flex-1 overflow-y-auto p-6" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-lg mx-auto w-full flex flex-col gap-6">
         {/* Header */}
         <div>

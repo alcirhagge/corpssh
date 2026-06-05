@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { X, Monitor, Terminal, Palette, Key, Info } from 'lucide-react'
+import { X, Terminal, Palette, Key, Info } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
+import { THEMES, applyTheme, getThemeBase } from '../../themes'
 import type { AppSettings } from '../../types'
 
 interface SettingsPanelProps {
@@ -21,14 +22,12 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const handleSave = async () => {
     await window.api.settings.save(form)
     setSettings(form)
-    if (form.theme !== settings.theme) {
-      const t = form.theme === 'system'
-        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-        : form.theme
-      setTheme(t as 'dark' | 'light')
-      document.documentElement.classList.remove('dark', 'light')
-      document.documentElement.classList.add(t)
+    if (form.themeId !== settings.themeId) {
+      const base = getThemeBase(form.themeId ?? 'navy')
+      setTheme(base)
+      applyTheme(form.themeId ?? 'navy')
     }
+    document.documentElement.style.setProperty('--ui-font-size', `${form.uiFontSize ?? 14}px`)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -101,13 +100,53 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-4">
             {section === 'appearance' && (
-              <div className="flex flex-col gap-4">
-                <SettingRow label="Tema" description="Escolha entre dark, light ou automático">
-                  <select value={form.theme} onChange={e => set('theme', e.target.value)}>
-                    <option value="dark">Dark</option>
-                    <option value="light">Light</option>
-                    <option value="system">Sistema</option>
-                  </select>
+              <div className="flex flex-col gap-5">
+                {/* Theme picker */}
+                <div>
+                  <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Tema</p>
+                  <div className="mb-1">
+                    <p className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Escuro</p>
+                    <div className="flex gap-2">
+                      {THEMES.filter(t => t.base === 'dark').map(t => (
+                        <SettingsThemeSwatch
+                          key={t.id}
+                          theme={t}
+                          active={(form.themeId ?? 'navy') === t.id}
+                          onClick={() => set('themeId', t.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Claro</p>
+                    <div className="flex gap-2">
+                      {THEMES.filter(t => t.base === 'light').map(t => (
+                        <SettingsThemeSwatch
+                          key={t.id}
+                          theme={t}
+                          active={(form.themeId ?? 'navy') === t.id}
+                          onClick={() => set('themeId', t.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <SettingRow label="Tamanho da Interface" description="Tamanho do texto da interface (não terminal)">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={11}
+                      max={20}
+                      step={1}
+                      value={form.uiFontSize ?? 14}
+                      onChange={e => set('uiFontSize', parseInt(e.target.value))}
+                      style={{ flex: 1 }}
+                    />
+                    <span className="text-xs w-8 text-right" style={{ color: 'var(--text-secondary)' }}>
+                      {form.uiFontSize ?? 14}px
+                    </span>
+                  </div>
                 </SettingRow>
               </div>
             )}
@@ -292,6 +331,36 @@ function SettingRow({ label, description, children }: {
       </div>
       <div style={{ width: 200, flexShrink: 0 }}>{children}</div>
     </div>
+  )
+}
+
+function SettingsThemeSwatch({ theme, active, onClick }: {
+  theme: typeof THEMES[0]; active: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={theme.name}
+      className="flex flex-col items-center gap-1 p-1.5 rounded-lg"
+      style={{
+        border: active ? '2px solid var(--accent)' : '2px solid var(--border)',
+        background: active ? 'var(--accent-subtle)' : 'transparent',
+        cursor: 'pointer', transition: 'all 0.12s'
+      }}
+    >
+      <div
+        className="rounded overflow-hidden"
+        style={{ width: 52, height: 34, background: theme.bg, position: 'relative', border: '1px solid rgba(128,128,128,0.15)' }}
+      >
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 12, background: theme.surface }} />
+        <div style={{ position: 'absolute', right: 6, top: 7, width: 10, height: 10, borderRadius: 3, background: theme.accent }} />
+        <div style={{ position: 'absolute', left: 16, top: 9, width: 24, height: 3, borderRadius: 2, background: theme.text, opacity: 0.4 }} />
+        <div style={{ position: 'absolute', left: 16, top: 15, width: 18, height: 3, borderRadius: 2, background: theme.text, opacity: 0.2 }} />
+      </div>
+      <span style={{ fontSize: 10, color: active ? 'var(--accent)' : 'var(--text-secondary)', fontWeight: active ? 600 : 400 }}>
+        {theme.name}
+      </span>
+    </button>
   )
 }
 

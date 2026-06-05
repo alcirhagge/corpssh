@@ -37,10 +37,24 @@ export function createSessionLog(meta: SessionMeta): void {
   fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8')
 }
 
+function stripAnsi(str: string): string {
+  const cleaned = str
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b[^[\]]/g, '')
+    .replace(/\x9b[0-9;?]*[A-Za-z]/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+  // For each line, handle \r: last segment after \r wins (terminal overwrite semantics)
+  return cleaned.split('\n').map(line => {
+    const parts = line.split('\r')
+    return parts[parts.length - 1]
+  }).join('\n')
+}
+
 export function appendSessionData(sessionId: string, data: string): void {
   const file = path.join(SESSIONS_DIR, `${sessionId}.log`)
   if (!fs.existsSync(file)) return
-  fs.appendFileSync(file, data, 'utf-8')
+  fs.appendFileSync(file, stripAnsi(data), 'utf-8')
 }
 
 export function appendSessionCommand(sessionId: string, command: string): void {

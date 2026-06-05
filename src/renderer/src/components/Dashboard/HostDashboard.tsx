@@ -29,6 +29,8 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null)
   const [serverMenuId, setServerMenuId] = useState<string | null>(null)
+  const [addingGroup, setAddingGroup] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
 
   const filtered = useMemo(() => {
     if (!search.trim()) return servers
@@ -56,11 +58,16 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
       return next
     })
 
-  const handleAddGroup = async () => {
-    const name = prompt('Nome do grupo:')
-    if (!name?.trim()) return
-    const saved = await window.api.groups.save({ id: '', name: name.trim() })
+  const handleAddGroup = async (name: string) => {
+    const saved = await window.api.groups.save({ id: '', name })
     upsertGroup(saved)
+  }
+
+  const commitNewGroup = async () => {
+    const name = newGroupName.trim()
+    if (name) await handleAddGroup(name)
+    setNewGroupName('')
+    setAddingGroup(false)
   }
 
   const handleDeleteServer = async (id: string) => {
@@ -77,7 +84,7 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
 
   return (
     <div
-      className="flex flex-col h-full"
+      className="flex flex-col flex-1 overflow-hidden"
       style={{ background: 'var(--bg-app)' }}
       onClick={() => { setGroupMenuId(null); setServerMenuId(null) }}
     >
@@ -110,16 +117,32 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
         </button>
 
         {/* Add Group */}
-        <button
-          onClick={handleAddGroup}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs"
-          style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
-          title="Novo Grupo"
-        >
-          <FolderPlus size={13} />
-        </button>
+        {addingGroup ? (
+          <input
+            autoFocus
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitNewGroup() }
+              if (e.key === 'Escape') { setAddingGroup(false); setNewGroupName('') }
+            }}
+            onBlur={commitNewGroup}
+            placeholder="Nome do grupo..."
+            style={{ width: 140, fontSize: 12, padding: '4px 8px' }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <button
+            onClick={(e) => { e.stopPropagation(); setAddingGroup(true) }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs"
+            style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+            title="Novo Grupo"
+          >
+            <FolderPlus size={13} />
+          </button>
+        )}
 
         <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
 
@@ -227,10 +250,10 @@ function GroupHeader({ group, count, collapsed, onToggle, onAddHost, onDelete, m
         <span style={{ color: group.color ?? 'var(--text-muted)' }}>
           {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
         </span>
-        <span className="text-xs font-semibold uppercase tracking-wider">{group.name}</span>
+        <span className="text-xs font-semibold uppercase tracking-wider" style={{ fontSize: 12 }}>{group.name}</span>
         <span
           className="text-xs px-1.5 rounded"
-          style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)', fontSize: 10 }}
+          style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)', fontSize: 11 }}
         >
           {count}
         </span>
@@ -263,7 +286,7 @@ function SectionLabel({ label, count }: { label: string; count: number }) {
     <div className="flex items-center gap-2 mb-3">
       <span
         className="font-semibold uppercase tracking-widest"
-        style={{ color: 'var(--text-muted)', fontSize: 10, letterSpacing: '0.1em' }}
+        style={{ color: 'var(--text-muted)', fontSize: 11, letterSpacing: '0.1em' }}
       >
         {label}
       </span>
@@ -289,7 +312,7 @@ function HostGrid({ servers, viewMode, onConnect, onEdit, onDelete, menuOpenId, 
 }) {
   if (viewMode === 'grid') {
     return (
-      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
         {servers.map((s) => (
           <HostCard
             key={s.id}
@@ -390,15 +413,15 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
 
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
-            <p className="font-semibold truncate" style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+            <p className="font-semibold truncate" style={{ color: 'var(--text-primary)', fontSize: 14 }}>
               {server.name}
             </p>
             <ProtoBadge proto={server.protocol ?? 'ssh'} />
           </div>
-          <p className="truncate" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+          <p className="truncate" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
             {server.username ? `${server.username}@` : ''}{server.host}
           </p>
-          <p className="truncate" style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 2 }}>
+          <p className="truncate" style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 2 }}>
             port {server.port}
           </p>
         </div>

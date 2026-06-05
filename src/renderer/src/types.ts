@@ -39,6 +39,8 @@ export interface SSHKey {
 
 export interface AppSettings {
   theme: 'dark' | 'light' | 'system'
+  themeId: string
+  uiFontSize: number
   fontSize: number
   fontFamily: string
   cursorStyle: 'block' | 'bar' | 'underline'

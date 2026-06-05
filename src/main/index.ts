@@ -67,7 +67,6 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow!.show()
-
     if (!is.dev) {
       setTimeout(() => autoUpdater.checkForUpdates(), 3000)
     }
