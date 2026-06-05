@@ -1,6 +1,6 @@
 {
   "name": "ssh-corporate-client",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Corporate SSH Client - Beautiful and intuitive",
   "main": "./out/main/index.js",
   "scripts": {
@@ -18,7 +18,13 @@
       "output": "dist"
     },
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/cpu-features/**/*",
+      "**/node_modules/ssh2/lib/protocol/crypto/build/**/*"
     ],
     "publish": {
       "provider": "github",
@@ -47,34 +53,34 @@
     }
   },
   "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/tsconfig": "^1.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
     "@types/node": "^20.11.5",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@types/ssh2": "^1.11.19",
     "@vitejs/plugin-react": "^4.2.1",
-    "autoprefixer": "^10.4.17",
-    "electron": "^28.2.0",
-    "electron-builder": "^24.9.1",
-    "electron-vite": "^2.0.0",
-    "postcss": "^8.4.33",
-    "tailwindcss": "^3.4.1",
-    "typescript": "^5.3.3",
-    "vite": "^5.0.12"
-  },
-  "dependencies": {
-    "@electron-toolkit/preload": "^3.0.0",
-    "@electron-toolkit/utils": "^3.0.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-search": "^0.15.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/xterm": "^5.5.0",
-    "electron-updater": "^6.8.3",
+    "autoprefixer": "^10.4.17",
+    "electron": "^28.2.0",
+    "electron-builder": "^24.9.1",
+    "electron-vite": "^2.0.0",
     "framer-motion": "^11.0.3",
     "lucide-react": "^0.323.0",
+    "postcss": "^8.4.33",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "ssh2": "^1.15.0",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.12",
     "zustand": "^4.5.0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3",
+    "ssh2": "^1.15.0"
   }
 }
