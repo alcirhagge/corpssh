@@ -10,9 +10,10 @@ import { Search, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 interface TerminalPaneProps {
   tab: Tab
+  isActive: boolean
 }
 
-export default function TerminalPane({ tab }: TerminalPaneProps) {
+export default function TerminalPane({ tab, isActive }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -75,6 +76,40 @@ export default function TerminalPane({ tab }: TerminalPaneProps) {
     fitAddonRef.current = fitAddon
     searchAddonRef.current = searchAddon
 
+    // Ctrl+C (copy selection) / Ctrl+V (paste) / Ctrl+Shift+C / Ctrl+Shift+V
+    terminal.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true
+
+      // Ctrl+C or Ctrl+Shift+C — copy selection
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && terminal.hasSelection()) {
+        navigator.clipboard.writeText(terminal.getSelection()).catch(() => {})
+        return false
+      }
+
+      // Ctrl+Shift+C — always copy
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
+        navigator.clipboard.writeText(terminal.getSelection()).catch(() => {})
+        return false
+      }
+
+      // Ctrl+V or Ctrl+Shift+V — paste
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        navigator.clipboard.readText().then((text) => {
+          if (text) terminal.paste(text)
+        }).catch(() => {})
+        return false
+      }
+
+      return true
+    })
+
+    // Right-click paste
+    containerRef.current?.addEventListener('contextmenu', () => {
+      navigator.clipboard.readText().then((text) => {
+        if (text) terminal.paste(text)
+      }).catch(() => {})
+    })
+
     // Send input to SSH + capture commands for session log
     let cmdBuffer = ''
     terminal.onData(data => {
@@ -126,6 +161,19 @@ export default function TerminalPane({ tab }: TerminalPaneProps) {
       terminalRef.current = null
     }
   }, [tab.sessionId])
+
+  // Repaint + refit when this tab becomes active again
+  // Fixes the "only new text visible" corruption after switching tabs
+  useEffect(() => {
+    if (!isActive || !terminalRef.current || !fitAddonRef.current) return
+    requestAnimationFrame(() => {
+      fitAddonRef.current?.fit()
+      if (terminalRef.current) {
+        terminalRef.current.refresh(0, terminalRef.current.rows - 1)
+        terminalRef.current.focus()
+      }
+    })
+  }, [isActive])
 
   const handleSearch = (direction: 'next' | 'prev') => {
     if (!searchAddonRef.current || !searchQuery) return

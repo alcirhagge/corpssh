@@ -289,7 +289,7 @@ function HostGrid({ servers, viewMode, onConnect, onEdit, onDelete, menuOpenId, 
 }) {
   if (viewMode === 'grid') {
     return (
-      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
         {servers.map((s) => (
           <HostCard
             key={s.id}

@@ -1,6 +1,6 @@
 {
   "name": "ssh-corporate-client",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Corporate SSH client with dark/light themes, multi-tab terminal, SFTP and session logging",
   "author": "alcirhagge",
   "license": "MIT",

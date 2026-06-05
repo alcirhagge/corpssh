@@ -199,7 +199,7 @@ export default function App() {
                       {tab.status === 'connected' && tab.sessionId && (
                         tab.mode === 'sftp'
                           ? <SFTPBrowser tab={tab} />
-                          : <TerminalPane tab={tab} />
+                          : <TerminalPane tab={tab} isActive={tab.id === activeTabId} />
                       )}
                     </div>
                   ))
