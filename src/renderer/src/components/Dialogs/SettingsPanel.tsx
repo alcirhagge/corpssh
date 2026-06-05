@@ -114,12 +114,19 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
 
             {section === 'terminal' && (
               <div className="flex flex-col gap-4">
-                <SettingRow label="Família de Fonte" description="Fonte do terminal">
-                  <input
+                <SettingRow label="Fonte do Terminal" description="Fonte monoespaçada usada no terminal">
+                  <select
                     value={form.fontFamily}
                     onChange={e => set('fontFamily', e.target.value)}
-                    placeholder="JetBrains Mono, monospace"
-                  />
+                  >
+                    <option value="JetBrains Mono, monospace">JetBrains Mono</option>
+                    <option value="Cascadia Code, monospace">Cascadia Code</option>
+                    <option value="Fira Code, monospace">Fira Code</option>
+                    <option value="Source Code Pro, monospace">Source Code Pro</option>
+                    <option value="Consolas, monospace">Consolas</option>
+                    <option value="Courier New, monospace">Courier New</option>
+                    <option value="monospace">Monospace (sistema)</option>
+                  </select>
                 </SettingRow>
 
                 <SettingRow label="Tamanho da Fonte" description="Tamanho em pixels">

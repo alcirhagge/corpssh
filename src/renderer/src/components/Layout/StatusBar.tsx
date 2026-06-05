@@ -1,32 +1,29 @@
 import { useAppStore } from '../../store/appStore'
-import { Wifi, WifiOff, Terminal } from 'lucide-react'
+import { Wifi } from 'lucide-react'
+
+declare const __APP_VERSION__: string
 
 export default function StatusBar() {
   const { tabs, activeTabId } = useAppStore()
-  const activeTab = tabs.find(t => t.id === activeTabId)
-  const connectedCount = tabs.filter(t => t.status === 'connected').length
+  const activeTab = tabs.find((t) => t.id === activeTabId)
+  const connectedCount = tabs.filter((t) => t.status === 'connected').length
 
   return (
     <div
-      className="flex items-center justify-between px-3 text-xs"
+      className="flex items-center justify-between px-4 text-xs select-none"
       style={{
-        height: 24,
+        height: 26,
         background: 'var(--bg-elevated)',
         borderTop: '1px solid var(--border-subtle)',
         color: 'var(--text-muted)'
       }}
     >
-      {/* Left */}
       <div className="flex items-center gap-3">
         {activeTab ? (
           <>
             <div className={`status-dot ${activeTab.status}`} />
-            <span style={{ color: 'var(--text-secondary)' }}>
-              {activeTab.serverName}
-            </span>
-            <span style={{ color: 'var(--text-muted)' }}>
-              {activeTab.serverHost}
-            </span>
+            <span style={{ color: 'var(--text-secondary)' }}>{activeTab.serverName}</span>
+            <span style={{ color: 'var(--text-muted)' }}>{activeTab.serverHost}</span>
             {activeTab.status === 'connecting' && (
               <span style={{ color: 'var(--warning)' }}>Conectando...</span>
             )}
@@ -39,18 +36,14 @@ export default function StatusBar() {
         )}
       </div>
 
-      {/* Right */}
       <div className="flex items-center gap-3">
         {connectedCount > 0 && (
           <div className="flex items-center gap-1" style={{ color: 'var(--success)' }}>
             <Wifi size={10} />
-            <span>{connectedCount} conexã{connectedCount !== 1 ? 'ões' : 'o'}</span>
+            <span>{connectedCount} sessão{connectedCount !== 1 ? 'ões' : ''} ativa{connectedCount !== 1 ? 's' : ''}</span>
           </div>
         )}
-        <div className="flex items-center gap-1">
-          <Terminal size={10} />
-          <span>CorpSSH v1.0</span>
-        </div>
+        <span style={{ color: 'var(--text-muted)' }}>v{__APP_VERSION__}</span>
       </div>
     </div>
   )

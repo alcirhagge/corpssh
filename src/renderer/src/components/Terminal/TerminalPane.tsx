@@ -75,14 +75,26 @@ export default function TerminalPane({ tab }: TerminalPaneProps) {
     fitAddonRef.current = fitAddon
     searchAddonRef.current = searchAddon
 
-    // Send input to SSH
+    // Send input to SSH + capture commands for session log
+    let cmdBuffer = ''
     terminal.onData(data => {
       window.api.ssh.input(tab.sessionId!, data)
+      // Build command buffer and log on Enter
+      if (data === '\r' || data === '\n') {
+        const cmd = cmdBuffer.trim()
+        if (cmd && tab.sessionId) window.api.session.command(tab.sessionId, cmd)
+        cmdBuffer = ''
+      } else if (data === '\x7f') {
+        cmdBuffer = cmdBuffer.slice(0, -1)
+      } else if (data.charCodeAt(0) >= 32) {
+        cmdBuffer += data
+      }
     })
 
-    // Receive data from SSH
+    // Receive data from SSH + stream to session log
     const unsubData = window.api.ssh.onData(tab.sessionId!, data => {
       terminal.write(data)
+      if (tab.sessionId) window.api.session.data(tab.sessionId, data)
     })
 
     // Connection closed

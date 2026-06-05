@@ -79,6 +79,15 @@ const api = {
     openKey: () => ipcRenderer.invoke('dialog:openKey')
   },
 
+  // Session logs
+  session: {
+    data: (sessionId: string, data: string) => ipcRenderer.invoke('session:data', sessionId, data),
+    command: (sessionId: string, cmd: string) => ipcRenderer.invoke('session:command', sessionId, cmd),
+    list: () => ipcRenderer.invoke('session:list'),
+    read: (sessionId: string) => ipcRenderer.invoke('session:read', sessionId),
+    delete: (sessionId: string) => ipcRenderer.invoke('session:delete', sessionId)
+  },
+
   // Logger
   log: {
     list: () => ipcRenderer.invoke('log:list'),

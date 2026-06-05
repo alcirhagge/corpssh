@@ -4,6 +4,10 @@ import { addLogEntry, getLogs, clearLogs } from './logger'
 import { sendRemoteLog, testConnection, setRemoteConfig, type RemoteLogConfig } from './remoteLogger'
 import { exportToXML, importFromXML } from './xmlManager'
 import {
+  createSessionLog, appendSessionData, appendSessionCommand,
+  closeSessionLog, listSessions, readSessionLog, deleteSession
+} from './sessionLogger'
+import {
   createSSHConnection,
   createShellSession,
   sendInput,
@@ -114,6 +118,17 @@ export function setupIpcHandlers(): void {
     return data
   })
 
+  // --- Session logging ---
+  ipcMain.handle('session:data', (_e, sessionId: string, data: string) => {
+    appendSessionData(sessionId, data)
+  })
+  ipcMain.handle('session:command', (_e, sessionId: string, command: string) => {
+    appendSessionCommand(sessionId, command)
+  })
+  ipcMain.handle('session:list', () => listSessions())
+  ipcMain.handle('session:read', (_e, sessionId: string) => readSessionLog(sessionId))
+  ipcMain.handle('session:delete', (_e, sessionId: string) => { deleteSession(sessionId); return true })
+
   // --- SSH Connection ---
   ipcMain.handle('ssh:connect', async (_e, config) => {
     const sessionId = generateId()
@@ -124,6 +139,13 @@ export function setupIpcHandlers(): void {
       serverName: config.name ?? config.host,
       host: `${config.host}:${config.port}`,
       username: config.username
+    })
+    createSessionLog({
+      sessionId, serverId: config.id,
+      serverName: config.name ?? config.host,
+      host: `${config.host}:${config.port}`,
+      username: config.username,
+      startedAt: Date.now()
     })
     const win = BrowserWindow.getAllWindows()[0]
     win?.webContents.send('log:new', entry)
@@ -146,8 +168,10 @@ export function setupIpcHandlers(): void {
 
   ipcMain.handle('ssh:disconnect', (_e, sessionId: string, meta?: { serverId: string; serverName: string; host: string; username: string; connectedAt?: number }) => {
     disconnectSSH(sessionId)
+    const now = Date.now()
+    closeSessionLog(sessionId, now)
     if (meta) {
-      const duration = meta.connectedAt ? Date.now() - meta.connectedAt : undefined
+      const duration = meta.connectedAt ? now - meta.connectedAt : undefined
       const entry = addLogEntry({ type: 'disconnect', ...meta, duration })
       const win = BrowserWindow.getAllWindows()[0]
       win?.webContents.send('log:new', entry)

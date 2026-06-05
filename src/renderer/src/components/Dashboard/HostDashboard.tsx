@@ -260,13 +260,16 @@ function GroupHeader({ group, count, collapsed, onToggle, onAddHost, onDelete, m
 
 function SectionLabel({ label, count }: { label: string; count: number }) {
   return (
-    <div className="flex items-center gap-2 mb-2">
-      <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
+    <div className="flex items-center gap-2 mb-3">
+      <span
+        className="font-semibold uppercase tracking-widest"
+        style={{ color: 'var(--text-muted)', fontSize: 10, letterSpacing: '0.1em' }}
+      >
         {label}
       </span>
       <span
-        className="text-xs px-1.5 rounded"
-        style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)', fontSize: 10 }}
+        className="rounded-full px-1.5"
+        style={{ background: 'var(--bg-active)', color: 'var(--text-muted)', fontSize: 10, lineHeight: '16px' }}
       >
         {count}
       </span>
@@ -335,54 +338,69 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
 
   return (
     <div
-      className="relative rounded-xl p-3 flex flex-col gap-2 cursor-pointer"
+      className="relative rounded-xl cursor-pointer overflow-hidden"
       style={{
         background: hovered ? 'var(--bg-elevated)' : 'var(--bg-card)',
-        border: `1px solid ${hovered ? 'var(--accent)' : 'var(--border)'}`,
-        transition: 'all 0.15s'
+        border: `1px solid ${hovered ? color + '55' : 'var(--border)'}`,
+        boxShadow: hovered ? `0 4px 20px rgba(0,0,0,0.25), 0 0 0 1px ${color}22` : '0 1px 4px rgba(0,0,0,0.15)',
+        transition: 'all 0.18s ease'
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onDoubleClick={onConnect}
     >
-      <div className="flex items-start justify-between">
-        <div
-          className="host-icon"
-          style={{ width: 38, height: 38, background: `linear-gradient(135deg, ${color}, ${color}bb)` }}
-        >
-          {initials}
-        </div>
-        <div className="flex gap-1">
-          {hovered && (
-            <button
-              onClick={(e) => { e.stopPropagation(); onConnect() }}
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs"
-              style={{ background: 'var(--accent)', color: '#fff' }}
-            >
-              <Terminal size={11} />
-              SSH
-            </button>
-          )}
-          <button
-            onClick={onMenuOpen}
-            className="flex items-center justify-center w-6 h-6 rounded"
-            style={{ color: 'var(--text-muted)', background: 'transparent' }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-active)')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      {/* Color accent line at top */}
+      <div style={{ height: 3, background: `linear-gradient(90deg, ${color}, ${color}66)` }} />
+
+      <div className="p-3.5">
+        <div className="flex items-start justify-between mb-3">
+          <div
+            className="host-icon"
+            style={{
+              width: 42, height: 42,
+              background: `linear-gradient(145deg, ${color}dd, ${color}88)`,
+              boxShadow: `0 4px 12px ${color}44`,
+              fontSize: 13, fontWeight: 700, borderRadius: 10
+            }}
           >
-            <MoreHorizontal size={13} />
-          </button>
+            {initials}
+          </div>
+          <div className="flex items-center gap-1">
+            {hovered && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onConnect() }}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium"
+                style={{ background: 'var(--accent)', color: '#fff', fontSize: 11 }}
+              >
+                <Terminal size={10} />
+                SSH
+              </button>
+            )}
+            <button
+              onClick={onMenuOpen}
+              className="flex items-center justify-center w-6 h-6 rounded-md"
+              style={{ color: hovered ? 'var(--text-secondary)' : 'var(--text-muted)', background: 'transparent' }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-active)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              <MoreHorizontal size={13} />
+            </button>
+          </div>
+        </div>
+
+        <div className="min-w-0">
+          <p className="font-semibold truncate mb-0.5" style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+            {server.name}
+          </p>
+          <p className="truncate" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
+            {server.username}@{server.host}
+          </p>
+          <p className="truncate" style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 2 }}>
+            SSH · port {server.port}
+          </p>
         </div>
       </div>
-      <div className="min-w-0">
-        <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{server.name}</p>
-        <p className="text-xs truncate" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-          ssh, {server.username}
-        </p>
-        <p className="text-xs truncate" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-          {server.host}:{server.port}
-        </p>
-      </div>
+
       {menuOpen && (
         <DropMenu onClose={onMenuClose} items={[
           { label: 'Conectar', onClick: onConnect },

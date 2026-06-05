@@ -3,7 +3,6 @@
 import type { API } from '../../preload'
 
 declare global {
-  interface Window {
-    api: API
-  }
+  interface Window { api: API }
+  const __APP_VERSION__: string
 }

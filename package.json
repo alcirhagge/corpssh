@@ -1,6 +1,6 @@
 {
   "name": "ssh-corporate-client",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Corporate SSH Client - Beautiful and intuitive",
   "main": "./out/main/index.js",
   "scripts": {

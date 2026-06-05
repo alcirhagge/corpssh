@@ -1,13 +1,12 @@
 import { useState } from 'react'
-import { Server, Key, List, FileDown, Settings, Terminal, MonitorCheck } from 'lucide-react'
+import { Monitor, List, FileDown, Settings, Terminal } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { NavPage } from '../../types'
 
 const NAV_ITEMS: { id: NavPage; label: string; icon: React.ReactNode }[] = [
-  { id: 'hosts',    label: 'Hosts',    icon: <Server size={16} /> },
-  { id: 'keys',     label: 'Keychain', icon: <Key size={16} /> },
-  { id: 'logs',     label: 'Logs',     icon: <List size={16} /> },
-  { id: 'export',   label: 'Export',   icon: <FileDown size={16} /> },
+  { id: 'hosts',  label: 'Hosts',  icon: <Monitor size={15} /> },
+  { id: 'logs',   label: 'Logs',   icon: <List size={15} /> },
+  { id: 'export', label: 'Export', icon: <FileDown size={15} /> },
 ]
 
 export default function Sidebar() {
@@ -16,35 +15,39 @@ export default function Sidebar() {
 
   return (
     <div
-      className="flex flex-col h-full py-2 select-none"
-      style={{
-        width: 160,
-        background: 'var(--sidebar-bg)',
-        borderRight: '1px solid var(--border-subtle)',
-        flexShrink: 0
-      }}
+      className="flex flex-col h-full select-none"
+      style={{ width: 168, background: 'var(--sidebar-bg)', borderRight: '1px solid var(--border-subtle)', flexShrink: 0 }}
     >
-      {/* Main nav */}
-      <div className="flex flex-col gap-0.5 px-2 flex-1">
+      {/* Logo strip */}
+      <div className="flex items-center gap-2.5 px-4 py-3.5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+        <div
+          className="flex items-center justify-center rounded-lg"
+          style={{ width: 22, height: 22, background: 'var(--accent)', flexShrink: 0 }}
+        >
+          <Terminal size={12} color="#fff" strokeWidth={2.5} />
+        </div>
+        <span className="text-xs font-bold tracking-wide" style={{ color: 'var(--text-primary)', letterSpacing: '0.04em' }}>
+          CorpSSH
+        </span>
+      </div>
+
+      {/* Nav */}
+      <div className="flex flex-col gap-0.5 p-2 flex-1">
         {NAV_ITEMS.map((item) => (
           <NavItem
             key={item.id}
             icon={item.icon}
             label={item.label}
             active={activePage === item.id}
-            onClick={() => {
-              setActivePage(item.id)
-              setRightPanel(null)
-            }}
+            onClick={() => { setActivePage(item.id); setRightPanel(null) }}
           />
         ))}
 
-        {/* Active sessions */}
         {activeSessions > 0 && (
           <>
-            <div style={{ height: 1, background: 'var(--border-subtle)', margin: '6px 4px' }} />
+            <div style={{ height: 1, background: 'var(--border-subtle)', margin: '6px 6px' }} />
             <NavItem
-              icon={<Terminal size={16} />}
+              icon={<Terminal size={15} />}
               label="Terminal"
               active={activePage === 'terminal'}
               badge={activeSessions}
@@ -54,61 +57,50 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Bottom: Settings */}
-      <div className="px-2">
-        <div style={{ height: 1, background: 'var(--border-subtle)', marginBottom: 6 }} />
+      {/* Settings at bottom */}
+      <div className="p-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <NavItem
-          icon={<Settings size={16} />}
+          icon={<Settings size={15} />}
           label="Settings"
-          active={false}
-          onClick={() => setActivePage('hosts')}
+          active={activePage === 'keys'}
+          onClick={() => setActivePage('keys')}
         />
       </div>
     </div>
   )
 }
 
-function NavItem({
-  icon, label, active, badge, onClick
-}: {
-  icon: React.ReactNode
-  label: string
-  active: boolean
-  badge?: number
-  onClick: () => void
+function NavItem({ icon, label, active, badge, onClick }: {
+  icon: React.ReactNode; label: string; active: boolean; badge?: number; onClick: () => void
 }) {
+  const [hovered, setHovered] = useState(false)
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-md relative"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg relative"
       style={{
-        background: active ? 'var(--bg-active)' : 'transparent',
-        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-        fontWeight: active ? 500 : 400,
-        textAlign: 'left'
-      }}
-      onMouseEnter={(e) => {
-        if (!active) e.currentTarget.style.background = 'var(--bg-hover)'
-        if (!active) e.currentTarget.style.color = 'var(--text-primary)'
-      }}
-      onMouseLeave={(e) => {
-        if (!active) e.currentTarget.style.background = 'transparent'
-        if (!active) e.currentTarget.style.color = 'var(--text-secondary)'
+        background: active ? 'var(--bg-active)' : hovered ? 'var(--bg-hover)' : 'transparent',
+        color: active ? 'var(--text-primary)' : hovered ? 'var(--text-primary)' : 'var(--text-secondary)',
+        fontWeight: active ? 600 : 400,
+        fontSize: 12,
+        textAlign: 'left',
+        transition: 'background 0.12s, color 0.12s'
       }}
     >
-      {/* Active indicator bar */}
       {active && (
         <div
-          className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r"
-          style={{ width: 3, height: 18, background: 'var(--accent)' }}
+          className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
+          style={{ width: 3, height: 16, background: 'var(--accent)' }}
         />
       )}
       <span style={{ color: active ? 'var(--accent)' : 'inherit', flexShrink: 0 }}>{icon}</span>
-      <span className="text-xs flex-1">{label}</span>
+      <span className="flex-1">{label}</span>
       {badge !== undefined && badge > 0 && (
         <span
-          className="text-xs px-1.5 rounded-full"
-          style={{ background: 'var(--accent)', color: '#fff', fontSize: 10, minWidth: 18, textAlign: 'center' }}
+          className="rounded-full px-1.5 text-center"
+          style={{ background: 'var(--accent)', color: '#fff', fontSize: 10, minWidth: 18, lineHeight: '18px' }}
         >
           {badge}
         </span>

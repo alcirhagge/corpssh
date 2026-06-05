@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react'
-import { Trash2, RefreshCw, Download, Settings, CheckCircle, XCircle, Wifi, Activity } from 'lucide-react'
+import { Trash2, RefreshCw, Download, CheckCircle, XCircle, Wifi, Activity, FileText, ChevronLeft } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { LogEntry, RemoteLogConfig } from '../../types'
+
+interface SessionMeta {
+  sessionId: string; serverId: string; serverName: string
+  host: string; username: string; startedAt: number; endedAt?: number
+}
 
 function formatDur(ms?: number): string {
   if (!ms) return '—'
@@ -25,7 +30,9 @@ const TYPE_STYLE: Record<LogEntry['type'], { label: string; color: string }> = {
 
 export default function LogsPanel() {
   const { logs, setLogs, clearLogs, settings, setSettings } = useAppStore()
-  const [tab, setTab] = useState<'events' | 'remote'>('events')
+  const [tab, setTab] = useState<'events' | 'sessions' | 'remote'>('events')
+  const [sessions, setSessions] = useState<SessionMeta[]>([])
+  const [viewingSession, setViewingSession] = useState<{ id: string; content: string } | null>(null)
   const [remoteForm, setRemoteForm] = useState<RemoteLogConfig>(
     settings.remoteLogConfig ?? {
       enabled: false, provider: 'graylog', host: '', port: 12201, tls: false
@@ -37,6 +44,7 @@ export default function LogsPanel() {
 
   useEffect(() => {
     window.api.log.list().then(setLogs)
+    window.api.session.list().then(setSessions)
   }, [])
 
   const handleClear = async () => {
@@ -97,8 +105,9 @@ export default function LogsPanel() {
         style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}
       >
         {([
-          { id: 'events', label: 'Eventos', icon: <Activity size={13} /> },
-          { id: 'remote', label: 'Remote Logging', icon: <Wifi size={13} /> }
+          { id: 'events',   label: 'Eventos',        icon: <Activity size={13} /> },
+          { id: 'sessions', label: 'Sessões',         icon: <FileText size={13} /> },
+          { id: 'remote',   label: 'Remote Logging',  icon: <Wifi size={13} /> }
         ] as const).map((t) => (
           <button
             key={t.id}
@@ -162,6 +171,99 @@ export default function LogsPanel() {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {tab === 'sessions' && (
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {viewingSession ? (
+            <>
+              <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
+                <button
+                  onClick={() => setViewingSession(null)}
+                  className="flex items-center gap-1 text-xs"
+                  style={{ color: 'var(--text-secondary)', background: 'none' }}
+                >
+                  <ChevronLeft size={13} />
+                  Voltar
+                </button>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Sessão {viewingSession.id.slice(0, 8)}...
+                </span>
+              </div>
+              <pre
+                className="flex-1 overflow-auto p-4 text-xs"
+                style={{
+                  fontFamily: 'JetBrains Mono, monospace',
+                  color: 'var(--text-secondary)',
+                  background: 'var(--terminal-bg)',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all'
+                }}
+              >
+                {viewingSession.content}
+              </pre>
+            </>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              {sessions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-48 gap-2" style={{ color: 'var(--text-muted)' }}>
+                  <FileText size={28} />
+                  <p className="text-sm">Nenhuma sessão registrada</p>
+                </div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
+                      {['Servidor', 'Host', 'Usuário', 'Início', 'Duração', ''].map((h) => (
+                        <th key={h} className="text-left px-3 py-2 text-xs font-medium" style={{ color: 'var(--text-muted)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessions.map((s) => {
+                      const dur = s.endedAt
+                        ? Math.round((s.endedAt - s.startedAt) / 1000)
+                        : null
+                      const [hovered, setHovered] = [false, () => {}]
+                      return (
+                        <tr
+                          key={s.sessionId}
+                          style={{ borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                          onClick={async () => {
+                            const content = await window.api.session.read(s.sessionId)
+                            setViewingSession({ id: s.sessionId, content })
+                          }}
+                        >
+                          <td className="px-3 py-2 text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{s.serverName}</td>
+                          <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{s.host}</td>
+                          <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{s.username}</td>
+                          <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>{new Date(s.startedAt).toLocaleString('pt-BR')}</td>
+                          <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                            {dur !== null ? `${dur}s` : <span style={{ color: 'var(--success)' }}>ativa</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                await window.api.session.delete(s.sessionId)
+                                setSessions((prev) => prev.filter((x) => x.sessionId !== s.sessionId))
+                              }}
+                              style={{ color: 'var(--error)', background: 'none' }}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
           )}
         </div>
       )}
