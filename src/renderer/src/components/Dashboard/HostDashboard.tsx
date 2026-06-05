@@ -1,14 +1,14 @@
 import { useState, useMemo } from 'react'
-import { Plus, Search, ChevronDown, Grid, List, Terminal, Folder, FolderOpen, MoreHorizontal, Pencil, Trash2, FolderPlus } from 'lucide-react'
+import { Plus, Search, ChevronDown, Grid, List, Terminal, Folder, FolderOpen, MoreHorizontal, Trash2, FolderPlus, Monitor } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import type { Server, Group } from '../../types'
+import type { Server as ServerType, Group } from '../../types'
 import { HOST_ICON_COLORS } from '../../types'
 
 interface HostDashboardProps {
-  onConnect: (server: Server) => void
+  onConnect: (server: ServerType) => void
 }
 
-function getIconColor(server: Server): string {
+function getIconColor(server: ServerType): string {
   if (server.color) return server.color
   const idx = server.name.charCodeAt(0) % HOST_ICON_COLORS.length
   return HOST_ICON_COLORS[idx]
@@ -39,7 +39,7 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
   }, [servers, search])
 
   const byGroup = useMemo(() => {
-    const map = new Map<string, Server[]>()
+    const map = new Map<string, ServerType[]>()
     map.set('__none__', [])
     groups.forEach((g) => map.set(g.id, []))
     filtered.forEach((s) => {
@@ -275,10 +275,10 @@ function SectionLabel({ label, count }: { label: string; count: number }) {
 }
 
 function HostGrid({ servers, viewMode, onConnect, onEdit, onDelete, menuOpenId, onMenuOpen, onMenuClose }: {
-  servers: Server[]
+  servers: ServerType[]
   viewMode: 'grid' | 'list'
-  onConnect: (s: Server) => void
-  onEdit: (s: Server) => void
+  onConnect: (s: ServerType) => void
+  onEdit: (s: ServerType) => void
   onDelete: (id: string) => void
   menuOpenId: string | null
   onMenuOpen: (id: string, e: React.MouseEvent) => void
@@ -321,7 +321,7 @@ function HostGrid({ servers, viewMode, onConnect, onEdit, onDelete, menuOpenId, 
 }
 
 function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, onMenuClose }: {
-  server: Server
+  server: ServerType
   onConnect: () => void
   onEdit: () => void
   onDelete: () => void
@@ -395,7 +395,7 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
 }
 
 function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, onMenuClose }: {
-  server: Server; onConnect: () => void; onEdit: () => void; onDelete: () => void
+  server: ServerType; onConnect: () => void; onEdit: () => void; onDelete: () => void
   menuOpen: boolean; onMenuOpen: (e: React.MouseEvent) => void; onMenuClose: () => void
 }) {
   const [hovered, setHovered] = useState(false)
@@ -485,7 +485,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
         className="flex items-center justify-center w-16 h-16 rounded-2xl"
         style={{ background: 'var(--bg-elevated)', border: '2px dashed var(--border)' }}
       >
-        <Server size={28} style={{ color: 'var(--text-muted)' }} />
+        <Monitor size={28} style={{ color: 'var(--text-muted)' }} />
       </div>
       <div className="text-center">
         <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Nenhum host cadastrado</p>

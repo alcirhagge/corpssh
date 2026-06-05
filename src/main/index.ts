@@ -35,9 +35,11 @@ function setupAutoUpdater(): void {
   })
 
   autoUpdater.on('update-downloaded', (info) => {
-    mainWindow?.webContents.send('update:downloaded', {
-      version: info.version
-    })
+    mainWindow?.webContents.send('update:downloaded', { version: info.version })
+    // Instala silenciosamente quando o app for fechado
+    // isSilent=true: sem janela do instalador
+    // isForceRunAfter=true: reabre o app automaticamente
+    autoUpdater.autoInstallOnAppQuit = true
   })
 
   autoUpdater.on('error', (err) => {
@@ -100,7 +102,9 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
   ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized())
-  ipcMain.handle('update:install', () => autoUpdater.quitAndInstall())
+  // isSilent=true: instalador roda sem janela visível
+  // isForceRunAfter=true: reabre automaticamente após instalar
+  ipcMain.handle('update:install', () => autoUpdater.quitAndInstall(true, true))
   ipcMain.handle('update:check', () => {
     if (!is.dev) autoUpdater.checkForUpdates()
   })
