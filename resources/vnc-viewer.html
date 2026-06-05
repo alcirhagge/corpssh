@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VNC Viewer — CorpSSH</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0d1117; color: #c8cad8; font-family: Inter, system-ui, sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+
+    #toolbar {
+      display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+      background: #191c2a; border-bottom: 1px solid #282c43; flex-shrink: 0;
+      -webkit-app-region: drag;
+    }
+    #toolbar .logo { font-size: 11px; font-weight: 700; color: #4c74ff; -webkit-app-region: no-drag; }
+    #toolbar .host { font-size: 11px; color: #7b80a0; }
+    #toolbar .spacer { flex: 1; }
+    #toolbar button {
+      -webkit-app-region: no-drag; border: none; border-radius: 5px; padding: 4px 10px;
+      font-size: 11px; cursor: pointer; transition: all 0.15s;
+    }
+    #btn-keys { background: #1e2137; color: #c8cad8; }
+    #btn-keys:hover { background: #272c44; }
+    #btn-fullscreen { background: #1e2137; color: #c8cad8; }
+    #btn-fullscreen:hover { background: #272c44; }
+    #btn-disconnect { background: rgba(255,87,87,0.12); color: #ff5757; }
+    #btn-disconnect:hover { background: rgba(255,87,87,0.22); }
+
+    #status {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+      z-index: 100;
+    }
+    .spinner {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 3px solid #282c43; border-top-color: #4c74ff;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status-text { font-size: 13px; color: #7b80a0; }
+    .status-error { color: #ff5757; }
+
+    #screen { flex: 1; position: relative; }
+    #screen canvas { display: block; }
+
+    #clipboard-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      align-items: center; justify-content: center; z-index: 200;
+    }
+    #clipboard-overlay.visible { display: flex; }
+    #clipboard-box {
+      background: #1e2137; border: 1px solid #282c43; border-radius: 10px;
+      padding: 16px; width: 360px;
+    }
+    #clipboard-box h3 { font-size: 12px; color: #c8cad8; margin-bottom: 8px; }
+    #clipboard-text {
+      width: 100%; height: 80px; resize: none; background: #191c2a;
+      border: 1px solid #282c43; border-radius: 6px; color: #c8cad8;
+      font-family: monospace; font-size: 12px; padding: 6px;
+    }
+    #clipboard-actions { display: flex; gap: 8px; margin-top: 8px; }
+    #clipboard-actions button {
+      flex: 1; padding: 6px; border: none; border-radius: 6px; cursor: pointer;
+      font-size: 11px;
+    }
+    #btn-send-clip { background: #4c74ff; color: #fff; }
+    #btn-close-clip { background: #1e2137; color: #7b80a0; border: 1px solid #282c43; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <span class="logo">CorpSSH</span>
+    <span class="logo" style="color:#7b80a0">·</span>
+    <span id="host-label" class="host">VNC</span>
+    <div class="spacer"></div>
+    <button id="btn-keys" title="Enviar Ctrl+Alt+Del">Ctrl+Alt+Del</button>
+    <button id="btn-clipboard" id="btn-keys">Clipboard</button>
+    <button id="btn-fullscreen">Tela Cheia</button>
+    <button id="btn-disconnect">Desconectar</button>
+  </div>
+
+  <div id="screen">
+    <div id="status">
+      <div class="spinner"></div>
+      <span class="status-text" id="status-text">Conectando...</span>
+    </div>
+  </div>
+
+  <div id="clipboard-overlay">
+    <div id="clipboard-box">
+      <h3>Clipboard Remoto</h3>
+      <textarea id="clipboard-text" placeholder="Digite o texto para enviar ao servidor VNC..."></textarea>
+      <div id="clipboard-actions">
+        <button id="btn-send-clip">Enviar</button>
+        <button id="btn-close-clip">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js'
+
+    const params = new URLSearchParams(window.location.search)
+    const wsPort  = params.get('port')
+    const host    = params.get('host') || 'VNC'
+    const password = params.get('password') || ''
+
+    document.getElementById('host-label').textContent = host
+
+    const screen = document.getElementById('screen')
+    const statusEl = document.getElementById('status')
+    const statusText = document.getElementById('status-text')
+
+    let rfb = null
+
+    function connect() {
+      try {
+        rfb = new RFB(screen, `ws://127.0.0.1:${wsPort}`, {
+          credentials: { password },
+          wsProtocols: ['binary']
+        })
+
+        rfb.scaleViewport = true
+        rfb.resizeSession = false
+        rfb.viewOnly = false
+
+        rfb.addEventListener('connect', () => {
+          statusEl.style.display = 'none'
+        })
+
+        rfb.addEventListener('disconnect', (e) => {
+          statusEl.style.display = 'flex'
+          statusText.textContent = e.detail.clean ? 'Sessão encerrada.' : 'Conexão perdida.'
+          statusText.className = 'status-text status-error'
+        })
+
+        rfb.addEventListener('credentialsrequired', () => {
+          const pw = prompt('Senha VNC:') || ''
+          rfb.sendCredentials({ password: pw })
+        })
+
+        rfb.addEventListener('clipboard', (e) => {
+          navigator.clipboard?.writeText(e.detail.text).catch(() => {})
+        })
+
+      } catch (err) {
+        statusText.textContent = `Erro: ${err.message}`
+        statusText.className = 'status-text status-error'
+      }
+    }
+
+    // Controls
+    document.getElementById('btn-keys').addEventListener('click', () => {
+      rfb?.sendCtrlAltDel()
+    })
+
+    document.getElementById('btn-fullscreen').addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen()
+      else document.documentElement.requestFullscreen()
+    })
+
+    document.getElementById('btn-disconnect').addEventListener('click', () => {
+      rfb?.disconnect()
+      window.close()
+    })
+
+    document.getElementById('btn-clipboard').addEventListener('click', () => {
+      document.getElementById('clipboard-overlay').classList.add('visible')
+    })
+
+    document.getElementById('btn-send-clip').addEventListener('click', () => {
+      const text = document.getElementById('clipboard-text').value
+      rfb?.clipboardPasteFrom(text)
+      document.getElementById('clipboard-overlay').classList.remove('visible')
+    })
+
+    document.getElementById('btn-close-clip').addEventListener('click', () => {
+      document.getElementById('clipboard-overlay').classList.remove('visible')
+    })
+
+    connect()
+  </script>
+</body>
+</html>

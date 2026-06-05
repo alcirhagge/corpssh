@@ -50,6 +50,35 @@ export default function App() {
   }, [])
 
   const handleConnectServer = async (server: Server) => {
+    const proto = server.protocol ?? 'ssh'
+
+    // RDP — abre cliente nativo, sem tab no app
+    if (proto === 'rdp') {
+      const result = await window.api.rdp.connect({
+        id: server.id, name: server.name,
+        host: server.host, port: server.port,
+        username: server.username, password: server.password,
+        domain: server.rdpDomain, fullscreen: server.rdpFullscreen
+      })
+      if (!result.ok) alert(`RDP: ${result.message}`)
+      return
+    }
+
+    // VNC — abre janela separada com noVNC
+    if (proto === 'vnc') {
+      try {
+        await window.api.vnc.connect({
+          id: server.id, name: server.name,
+          host: server.host, port: server.port,
+          username: server.username, vncPassword: server.vncPassword
+        })
+      } catch (e: any) {
+        alert(`VNC: ${e.message}`)
+      }
+      return
+    }
+
+    // SSH — flow existente
     const tabId = `tab-${Date.now()}`
     const newTab: Tab = {
       id: tabId,
@@ -65,10 +94,8 @@ export default function App() {
 
     try {
       const sessionId = await window.api.ssh.connect({
-        id: server.id,
-        name: server.name,
-        host: server.host,
-        port: server.port,
+        id: server.id, name: server.name,
+        host: server.host, port: server.port,
         username: server.username,
         authMethod: server.authMethod,
         password: server.password,

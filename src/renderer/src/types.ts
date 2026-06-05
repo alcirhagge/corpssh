@@ -4,11 +4,18 @@ export interface Server {
   host: string
   port: number
   username: string
-  authMethod: 'password' | 'privateKey' | 'agent'
+  protocol: 'ssh' | 'rdp' | 'vnc'
+  // SSH
+  authMethod?: 'password' | 'privateKey' | 'agent'
   password?: string
   privateKeyPath?: string
   privateKeyContent?: string
   passphrase?: string
+  // VNC
+  vncPassword?: string
+  // RDP
+  rdpDomain?: string
+  rdpFullscreen?: boolean
   groupId?: string
   color?: string
   tags?: string[]

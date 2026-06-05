@@ -7,6 +7,8 @@ import {
   createSessionLog, appendSessionData, appendSessionCommand,
   closeSessionLog, listSessions, readSessionLog, deleteSession
 } from './sessionLogger'
+import { launchRDP } from './rdpManager'
+import { createVNCProxy, openVNCWindow, closeVNCSession } from './vncManager'
 import {
   createSSHConnection,
   createShellSession,
@@ -116,6 +118,28 @@ export function setupIpcHandlers(): void {
     data.groups.forEach(g => { if (!g.id) g.id = generateId(); require('./store').saveGroup(g) })
     data.servers.forEach(s => { if (!s.id) s.id = generateId(); require('./store').saveServer(s) })
     return data
+  })
+
+  // --- RDP ---
+  ipcMain.handle('rdp:connect', async (_e, config) => {
+    const result = await launchRDP(config)
+    if (result.ok) {
+      addLogEntry({ type: 'connect', serverId: config.id ?? '', serverName: config.name ?? config.host, host: `${config.host}:${config.port}`, username: config.username, message: 'RDP' })
+    }
+    return result
+  })
+
+  // --- VNC ---
+  ipcMain.handle('vnc:connect', async (_e, config) => {
+    const sessionId = generateId()
+    const wsPort = await createVNCProxy(sessionId, config.host, config.port)
+    openVNCWindow(sessionId, wsPort, config.name ?? config.host, `${config.host}:${config.port}`, config.vncPassword)
+    addLogEntry({ type: 'connect', serverId: config.id ?? '', serverName: config.name ?? config.host, host: `${config.host}:${config.port}`, username: config.username ?? 'vnc', message: 'VNC' })
+    return { sessionId, wsPort }
+  })
+  ipcMain.handle('vnc:disconnect', (_e, sessionId: string) => {
+    closeVNCSession(sessionId)
+    return true
   })
 
   // --- Session logging ---

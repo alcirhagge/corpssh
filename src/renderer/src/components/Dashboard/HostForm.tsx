@@ -22,7 +22,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
 
   const [form, setForm] = useState<Partial<Server>>({
     name: '', host: '', port: 22, username: '',
-    authMethod: 'password', password: '', color: undefined,
+    protocol: 'ssh', authMethod: 'password', password: '', color: undefined,
     groupId: defaultGroupId, notes: ''
   })
   const [showPw, setShowPw] = useState(false)
@@ -30,11 +30,13 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  const defaultPort = (proto: string) => proto === 'rdp' ? 3389 : proto === 'vnc' ? 5900 : 22
+
   useEffect(() => {
     if (editServer) {
       setForm({ ...editServer })
     } else {
-      setForm({ name: '', host: '', port: 22, username: '', authMethod: 'password', password: '', groupId: defaultGroupId })
+      setForm({ name: '', host: '', port: 22, username: '', protocol: 'ssh', authMethod: 'password', password: '', groupId: defaultGroupId })
     }
     setError('')
   }, [rightPanel])
@@ -119,6 +121,24 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
 
       {/* Form */}
       <div className="flex-1 overflow-y-auto">
+        {/* Protocol selector */}
+        <div className="flex gap-1 px-4 pt-3">
+          {(['ssh', 'rdp', 'vnc'] as const).map((proto) => (
+            <button
+              key={proto}
+              onClick={() => { set('protocol', proto); set('port', defaultPort(proto)) }}
+              className="flex-1 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider"
+              style={{
+                background: form.protocol === proto ? 'var(--accent)' : 'var(--bg-elevated)',
+                color: form.protocol === proto ? '#fff' : 'var(--text-secondary)',
+                border: `1px solid ${form.protocol === proto ? 'var(--accent)' : 'var(--border)'}`
+              }}
+            >
+              {proto}
+            </button>
+          ))}
+        </div>
+
         <FormSection label="Address">
           <input
             value={form.host ?? ''}
@@ -160,112 +180,169 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
           </div>
         </FormSection>
 
-        <FormSection label="SSH">
+        {/* Connection section — varia por protocolo */}
+        <FormSection label={form.protocol === 'ssh' ? 'SSH' : form.protocol === 'rdp' ? 'RDP' : 'VNC'}>
           <div className="flex gap-2">
-            <div className="flex-1">
-              <input
-                value={form.username ?? ''}
-                onChange={(e) => set('username', e.target.value)}
-                placeholder="Username"
-              />
-            </div>
-            <div style={{ width: 64 }}>
+            {form.protocol !== 'vnc' && (
+              <div className="flex-1">
+                <input
+                  value={form.username ?? ''}
+                  onChange={(e) => set('username', e.target.value)}
+                  placeholder="Username"
+                />
+              </div>
+            )}
+            <div style={{ width: form.protocol === 'vnc' ? '100%' : 64 }}>
               <input
                 type="number"
-                value={form.port ?? 22}
-                onChange={(e) => set('port', parseInt(e.target.value) || 22)}
+                value={form.port ?? defaultPort(form.protocol ?? 'ssh')}
+                onChange={(e) => set('port', parseInt(e.target.value) || defaultPort(form.protocol ?? 'ssh'))}
                 min={1} max={65535}
               />
             </div>
           </div>
-          <p className="text-xs mt-1 mb-2" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
-            SSH on port {form.port ?? 22}
+          {form.protocol === 'rdp' && (
+            <input
+              value={form.rdpDomain ?? ''}
+              onChange={(e) => set('rdpDomain', e.target.value)}
+              placeholder="Domínio (opcional)"
+              className="mt-2"
+            />
+          )}
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+            {form.protocol?.toUpperCase()} on port {form.port ?? defaultPort(form.protocol ?? 'ssh')}
           </p>
         </FormSection>
 
         <FormSection label="Credentials">
-          {/* Auth method */}
-          <div className="flex gap-1 mb-2">
-            {(['password', 'privateKey', 'agent'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => set('authMethod', m)}
-                className="flex-1 py-1 text-xs rounded-md"
-                style={{
-                  background: form.authMethod === m ? 'var(--accent)' : 'var(--bg-elevated)',
-                  color: form.authMethod === m ? '#fff' : 'var(--text-secondary)',
-                  border: `1px solid ${form.authMethod === m ? 'var(--accent)' : 'var(--border)'}`,
-                  fontSize: 10
-                }}
-              >
-                {m === 'password' ? 'Senha' : m === 'privateKey' ? 'Chave' : 'Agente'}
-              </button>
-            ))}
-          </div>
+          {/* SSH auth */}
+          {form.protocol === 'ssh' && (
+            <>
+              <div className="flex gap-1 mb-2">
+                {(['password', 'privateKey', 'agent'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => set('authMethod', m)}
+                    className="flex-1 py-1 text-xs rounded-md"
+                    style={{
+                      background: form.authMethod === m ? 'var(--accent)' : 'var(--bg-elevated)',
+                      color: form.authMethod === m ? '#fff' : 'var(--text-secondary)',
+                      border: `1px solid ${form.authMethod === m ? 'var(--accent)' : 'var(--border)'}`,
+                      fontSize: 10
+                    }}
+                  >
+                    {m === 'password' ? 'Senha' : m === 'privateKey' ? 'Chave' : 'Agente'}
+                  </button>
+                ))}
+              </div>
 
-          {form.authMethod === 'password' && (
+              {form.authMethod === 'password' && (
+                <div className="relative">
+                  <input
+                    type={showPw ? 'text' : 'password'}
+                    value={form.password ?? ''}
+                    onChange={(e) => set('password', e.target.value)}
+                    placeholder="Password"
+                    style={{ paddingRight: 32 }}
+                  />
+                  <button onClick={() => setShowPw((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2"
+                    style={{ color: 'var(--text-muted)', background: 'none' }}>
+                    {showPw ? <EyeOff size={12} /> : <Eye size={12} />}
+                  </button>
+                </div>
+              )}
+
+              {form.authMethod === 'privateKey' && (
+                <>
+                  <div className="flex gap-1.5 mb-2">
+                    <input
+                      value={form.privateKeyPath ?? ''}
+                      onChange={(e) => set('privateKeyPath', e.target.value)}
+                      placeholder="~/.ssh/id_rsa"
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      onClick={async () => { const p = await window.api.dialog.openKey(); if (p) set('privateKeyPath', p) }}
+                      className="px-2 py-1 rounded text-xs"
+                      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-secondary)', flexShrink: 0 }}
+                    >
+                      <Folder size={11} />
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showPassphrase ? 'text' : 'password'}
+                      value={form.passphrase ?? ''}
+                      onChange={(e) => set('passphrase', e.target.value)}
+                      placeholder="Passphrase (opcional)"
+                      style={{ paddingRight: 32 }}
+                    />
+                    <button onClick={() => setShowPassphrase((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2"
+                      style={{ color: 'var(--text-muted)', background: 'none' }}>
+                      {showPassphrase ? <EyeOff size={12} /> : <Eye size={12} />}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {form.authMethod === 'agent' && (
+                <div className="text-xs px-2 py-2 rounded" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
+                  Usando agente SSH do sistema
+                </div>
+              )}
+            </>
+          )}
+
+          {/* RDP password */}
+          {form.protocol === 'rdp' && (
+            <>
+              <div className="relative mb-2">
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={form.password ?? ''}
+                  onChange={(e) => set('password', e.target.value)}
+                  placeholder="Senha (opcional)"
+                  style={{ paddingRight: 32 }}
+                />
+                <button onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2"
+                  style={{ color: 'var(--text-muted)', background: 'none' }}>
+                  {showPw ? <EyeOff size={12} /> : <Eye size={12} />}
+                </button>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <div
+                  onClick={() => set('rdpFullscreen', !form.rdpFullscreen)}
+                  className="relative rounded-full"
+                  style={{ width: 32, height: 18, background: form.rdpFullscreen ? 'var(--accent)' : 'var(--bg-active)', cursor: 'pointer', flexShrink: 0 }}
+                >
+                  <div className="absolute top-1 rounded-full bg-white" style={{ width: 10, height: 10, left: form.rdpFullscreen ? 18 : 4, transition: 'left 0.15s' }} />
+                </div>
+                <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Iniciar em tela cheia</span>
+              </label>
+            </>
+          )}
+
+          {/* VNC password */}
+          {form.protocol === 'vnc' && (
             <div className="relative">
               <input
                 type={showPw ? 'text' : 'password'}
-                value={form.password ?? ''}
-                onChange={(e) => set('password', e.target.value)}
-                placeholder="Password"
+                value={form.vncPassword ?? ''}
+                onChange={(e) => set('vncPassword', e.target.value)}
+                placeholder="Senha VNC (opcional)"
                 style={{ paddingRight: 32 }}
               />
-              <button
-                onClick={() => setShowPw((v) => !v)}
+              <button onClick={() => setShowPw((v) => !v)}
                 className="absolute right-2 top-1/2 -translate-y-1/2"
-                style={{ color: 'var(--text-muted)', background: 'none' }}
-              >
+                style={{ color: 'var(--text-muted)', background: 'none' }}>
                 {showPw ? <EyeOff size={12} /> : <Eye size={12} />}
               </button>
             </div>
           )}
 
-          {form.authMethod === 'privateKey' && (
-            <>
-              <div className="flex gap-1.5 mb-2">
-                <input
-                  value={form.privateKeyPath ?? ''}
-                  onChange={(e) => set('privateKeyPath', e.target.value)}
-                  placeholder="~/.ssh/id_rsa"
-                  style={{ flex: 1 }}
-                />
-                <button
-                  onClick={async () => {
-                    const p = await window.api.dialog.openKey()
-                    if (p) set('privateKeyPath', p)
-                  }}
-                  className="px-2 py-1 rounded text-xs"
-                  style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-secondary)', flexShrink: 0 }}
-                >
-                  <Folder size={11} />
-                </button>
-              </div>
-              <div className="relative">
-                <input
-                  type={showPassphrase ? 'text' : 'password'}
-                  value={form.passphrase ?? ''}
-                  onChange={(e) => set('passphrase', e.target.value)}
-                  placeholder="Passphrase (opcional)"
-                  style={{ paddingRight: 32 }}
-                />
-                <button
-                  onClick={() => setShowPassphrase((v) => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2"
-                  style={{ color: 'var(--text-muted)', background: 'none' }}
-                >
-                  {showPassphrase ? <EyeOff size={12} /> : <Eye size={12} />}
-                </button>
-              </div>
-            </>
-          )}
-
-          {form.authMethod === 'agent' && (
-            <div className="text-xs px-2 py-2 rounded" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
-              Usando agente SSH do sistema
-            </div>
-          )}
         </FormSection>
 
         {error && (

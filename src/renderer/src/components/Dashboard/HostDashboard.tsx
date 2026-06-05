@@ -389,14 +389,17 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
         </div>
 
         <div className="min-w-0">
-          <p className="font-semibold truncate mb-0.5" style={{ color: 'var(--text-primary)', fontSize: 13 }}>
-            {server.name}
-          </p>
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <p className="font-semibold truncate" style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+              {server.name}
+            </p>
+            <ProtoBadge proto={server.protocol ?? 'ssh'} />
+          </div>
           <p className="truncate" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-            {server.username}@{server.host}
+            {server.username ? `${server.username}@` : ''}{server.host}
           </p>
           <p className="truncate" style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 2 }}>
-            SSH · port {server.port}
+            port {server.port}
           </p>
         </div>
       </div>
@@ -438,9 +441,12 @@ function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, on
         {getInitials(server.name)}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{server.name}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{server.name}</p>
+          <ProtoBadge proto={server.protocol ?? 'ssh'} />
+        </div>
         <p className="text-xs truncate" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-          ssh, {server.username}@{server.host}
+          {server.username ? `${server.username}@` : ''}{server.host}:{server.port}
         </p>
       </div>
       {hovered && (
@@ -467,6 +473,25 @@ function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, on
         ]} />
       )}
     </div>
+  )
+}
+
+const PROTO_COLORS: Record<string, string> = {
+  ssh: 'var(--success)', rdp: 'var(--accent)', vnc: 'var(--purple)'
+}
+
+function ProtoBadge({ proto }: { proto: string }) {
+  return (
+    <span
+      className="rounded px-1 font-mono font-bold"
+      style={{
+        background: `${PROTO_COLORS[proto] ?? 'var(--text-muted)'}22`,
+        color: PROTO_COLORS[proto] ?? 'var(--text-muted)',
+        fontSize: 9, letterSpacing: '0.05em', flexShrink: 0, lineHeight: '16px'
+      }}
+    >
+      {proto.toUpperCase()}
+    </span>
   )
 }
 

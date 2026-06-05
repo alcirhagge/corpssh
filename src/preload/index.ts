@@ -79,6 +79,17 @@ const api = {
     openKey: () => ipcRenderer.invoke('dialog:openKey')
   },
 
+  // RDP
+  rdp: {
+    connect: (config: unknown) => ipcRenderer.invoke('rdp:connect', config)
+  },
+
+  // VNC
+  vnc: {
+    connect: (config: unknown) => ipcRenderer.invoke('vnc:connect', config),
+    disconnect: (sessionId: string) => ipcRenderer.invoke('vnc:disconnect', sessionId)
+  },
+
   // Session logs
   session: {
     data: (sessionId: string, data: string) => ipcRenderer.invoke('session:data', sessionId, data),
