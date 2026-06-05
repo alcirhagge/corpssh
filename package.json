@@ -1,6 +1,6 @@
 {
   "name": "ssh-corporate-client",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Corporate SSH Client - Beautiful and intuitive",
   "main": "./out/main/index.js",
   "scripts": {
@@ -39,9 +39,11 @@
     },
     "nsis": {
       "oneClick": false,
+      "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "include": "resources/installer.nsh"
     },
     "mac": {
       "target": "dmg",
