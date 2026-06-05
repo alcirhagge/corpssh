@@ -1,8 +1,7 @@
 import { create } from 'zustand'
-import type { Server, Group, SSHKey, Tab, AppSettings, Theme } from '../types'
+import type { Server, Group, SSHKey, Tab, AppSettings, Theme, NavPage, LogEntry } from '../types'
 
 interface AppState {
-  // Data
   servers: Server[]
   groups: Group[]
   keys: SSHKey[]
@@ -10,30 +9,34 @@ interface AppState {
   tabs: Tab[]
   activeTabId: string | null
   theme: Theme
-
-  // Loading
+  activePage: NavPage
+  rightPanel: null | { mode: 'new'; groupId?: string } | { mode: 'edit'; server: Server }
+  logs: LogEntry[]
   isLoading: boolean
 
-  // Actions
-  setServers: (servers: Server[]) => void
-  setGroups: (groups: Group[]) => void
-  setKeys: (keys: SSHKey[]) => void
-  setSettings: (settings: AppSettings) => void
-  setTheme: (theme: Theme) => void
+  setServers: (s: Server[]) => void
+  setGroups: (g: Group[]) => void
+  setKeys: (k: SSHKey[]) => void
+  setSettings: (s: AppSettings) => void
+  setTheme: (t: Theme) => void
+  setActivePage: (p: NavPage) => void
+  setRightPanel: (p: AppState['rightPanel']) => void
 
-  addTab: (tab: Tab) => void
-  updateTab: (id: string, updates: Partial<Tab>) => void
+  addTab: (t: Tab) => void
+  updateTab: (id: string, u: Partial<Tab>) => void
   removeTab: (id: string) => void
   setActiveTab: (id: string | null) => void
 
-  upsertServer: (server: Server) => void
+  upsertServer: (s: Server) => void
   removeServer: (id: string) => void
-
-  upsertGroup: (group: Group) => void
+  upsertGroup: (g: Group) => void
   removeGroup: (id: string) => void
-
-  upsertKey: (key: SSHKey) => void
+  upsertKey: (k: SSHKey) => void
   removeKey: (id: string) => void
+
+  addLog: (e: LogEntry) => void
+  setLogs: (e: LogEntry[]) => void
+  clearLogs: () => void
 
   setLoading: (v: boolean) => void
 }
@@ -56,6 +59,9 @@ export const useAppStore = create<AppState>((set) => ({
   tabs: [],
   activeTabId: null,
   theme: 'dark',
+  activePage: 'hosts',
+  rightPanel: null,
+  logs: [],
   isLoading: false,
 
   setServers: (servers) => set({ servers }),
@@ -63,70 +69,50 @@ export const useAppStore = create<AppState>((set) => ({
   setKeys: (keys) => set({ keys }),
   setSettings: (settings) => set({ settings }),
   setTheme: (theme) => set({ theme }),
+  setActivePage: (activePage) => set({ activePage }),
+  setRightPanel: (rightPanel) => set({ rightPanel }),
 
-  addTab: (tab) =>
-    set((state) => ({
-      tabs: [...state.tabs, tab],
-      activeTabId: tab.id
-    })),
-
-  updateTab: (id, updates) =>
-    set((state) => ({
-      tabs: state.tabs.map((t) => (t.id === id ? { ...t, ...updates } : t))
-    })),
-
+  addTab: (tab) => set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id })),
+  updateTab: (id, u) => set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...u } : t)) })),
   removeTab: (id) =>
-    set((state) => {
-      const tabs = state.tabs.filter((t) => t.id !== id)
+    set((s) => {
+      const tabs = s.tabs.filter((t) => t.id !== id)
       const activeTabId =
-        state.activeTabId === id
-          ? tabs.length > 0
-            ? tabs[tabs.length - 1].id
-            : null
-          : state.activeTabId
+        s.activeTabId === id ? (tabs.length > 0 ? tabs[tabs.length - 1].id : null) : s.activeTabId
       return { tabs, activeTabId }
     }),
-
   setActiveTab: (id) => set({ activeTabId: id }),
 
   upsertServer: (server) =>
-    set((state) => {
-      const idx = state.servers.findIndex((s) => s.id === server.id)
-      const servers =
-        idx >= 0
-          ? state.servers.map((s) => (s.id === server.id ? server : s))
-          : [...state.servers, server]
-      return { servers }
-    }),
-
-  removeServer: (id) =>
-    set((state) => ({ servers: state.servers.filter((s) => s.id !== id) })),
+    set((s) => ({
+      servers:
+        s.servers.find((x) => x.id === server.id)
+          ? s.servers.map((x) => (x.id === server.id ? server : x))
+          : [...s.servers, server]
+    })),
+  removeServer: (id) => set((s) => ({ servers: s.servers.filter((x) => x.id !== id) })),
 
   upsertGroup: (group) =>
-    set((state) => {
-      const idx = state.groups.findIndex((g) => g.id === group.id)
-      const groups =
-        idx >= 0
-          ? state.groups.map((g) => (g.id === group.id ? group : g))
-          : [...state.groups, group]
-      return { groups }
-    }),
-
-  removeGroup: (id) =>
-    set((state) => ({ groups: state.groups.filter((g) => g.id !== id) })),
+    set((s) => ({
+      groups:
+        s.groups.find((x) => x.id === group.id)
+          ? s.groups.map((x) => (x.id === group.id ? group : x))
+          : [...s.groups, group]
+    })),
+  removeGroup: (id) => set((s) => ({ groups: s.groups.filter((x) => x.id !== id) })),
 
   upsertKey: (key) =>
-    set((state) => {
-      const idx = state.keys.findIndex((k) => k.id === key.id)
-      const keys =
-        idx >= 0
-          ? state.keys.map((k) => (k.id === key.id ? key : k))
-          : [...state.keys, key]
-      return { keys }
-    }),
+    set((s) => ({
+      keys:
+        s.keys.find((x) => x.id === key.id)
+          ? s.keys.map((x) => (x.id === key.id ? key : x))
+          : [...s.keys, key]
+    })),
+  removeKey: (id) => set((s) => ({ keys: s.keys.filter((x) => x.id !== id) })),
 
-  removeKey: (id) =>
-    set((state) => ({ keys: state.keys.filter((k) => k.id !== id) })),
+  addLog: (entry) => set((s) => ({ logs: [entry, ...s.logs].slice(0, 1000) })),
+  setLogs: (logs) => set({ logs }),
+  clearLogs: () => set({ logs: [] }),
 
   setLoading: (v) => set({ isLoading: v })
 }))

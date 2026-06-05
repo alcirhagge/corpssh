@@ -79,6 +79,24 @@ const api = {
     openKey: () => ipcRenderer.invoke('dialog:openKey')
   },
 
+  // Logger
+  log: {
+    list: () => ipcRenderer.invoke('log:list'),
+    clear: () => ipcRenderer.invoke('log:clear'),
+    testRemote: (config: unknown) => ipcRenderer.invoke('log:testRemote', config),
+    saveRemoteConfig: (config: unknown) => ipcRenderer.invoke('log:saveRemoteConfig', config),
+    onNew: (cb: (entry: unknown) => void) => {
+      ipcRenderer.on('log:new', (_e, entry) => cb(entry))
+      return () => ipcRenderer.removeAllListeners('log:new')
+    }
+  },
+
+  // XML
+  xml: {
+    export: () => ipcRenderer.invoke('xml:export'),
+    import: () => ipcRenderer.invoke('xml:import')
+  },
+
   // Auto-update
   updater: {
     check: () => ipcRenderer.invoke('update:check'),

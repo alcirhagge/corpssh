@@ -1,5 +1,8 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
+import { addLogEntry, getLogs, clearLogs } from './logger'
+import { sendRemoteLog, testConnection, setRemoteConfig, type RemoteLogConfig } from './remoteLogger'
+import { exportToXML, importFromXML } from './xmlManager'
 import {
   createSSHConnection,
   createShellSession,
@@ -65,13 +68,66 @@ export function setupIpcHandlers(): void {
 
   // --- Settings ---
   ipcMain.handle('settings:get', () => getSettings())
-  ipcMain.handle('settings:save', (_e, s) => { saveSettings(s); return true })
+  ipcMain.handle('settings:save', (_e, s) => {
+    saveSettings(s)
+    if (s.remoteLogConfig) setRemoteConfig(s.remoteLogConfig)
+    return true
+  })
+
+  // --- Logger ---
+  ipcMain.handle('log:list', () => getLogs())
+  ipcMain.handle('log:clear', () => { clearLogs(); return true })
+  ipcMain.handle('log:testRemote', async (_e, config: RemoteLogConfig) => testConnection(config))
+  ipcMain.handle('log:saveRemoteConfig', (_e, config: RemoteLogConfig) => {
+    setRemoteConfig(config)
+    return true
+  })
+
+  // --- XML Export/Import ---
+  ipcMain.handle('xml:export', async () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Exportar servidores',
+      defaultPath: `corpssh-export-${Date.now()}.xml`,
+      filters: [{ name: 'XML', extensions: ['xml'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const servers = getServers()
+    const groups = getGroups()
+    const xml = exportToXML(servers, groups)
+    require('fs').writeFileSync(result.filePath, xml, 'utf-8')
+    return result.filePath
+  })
+
+  ipcMain.handle('xml:import', async () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Importar servidores',
+      filters: [{ name: 'XML', extensions: ['xml'] }],
+      properties: ['openFile']
+    })
+    if (result.canceled || !result.filePaths.length) return null
+    const xml = require('fs').readFileSync(result.filePaths[0], 'utf-8')
+    const data = importFromXML(xml)
+    data.groups.forEach(g => { if (!g.id) g.id = generateId(); require('./store').saveGroup(g) })
+    data.servers.forEach(s => { if (!s.id) s.id = generateId(); require('./store').saveServer(s) })
+    return data
+  })
 
   // --- SSH Connection ---
   ipcMain.handle('ssh:connect', async (_e, config) => {
     const sessionId = generateId()
     await createSSHConnection(sessionId, config)
     updateLastConnected(config.id)
+    const entry = addLogEntry({
+      type: 'connect', serverId: config.id,
+      serverName: config.name ?? config.host,
+      host: `${config.host}:${config.port}`,
+      username: config.username
+    })
+    const win = BrowserWindow.getAllWindows()[0]
+    win?.webContents.send('log:new', entry)
+    sendRemoteLog(entry)
     return sessionId
   })
 
@@ -88,8 +144,15 @@ export function setupIpcHandlers(): void {
     resizeTerminal(sessionId, cols, rows)
   })
 
-  ipcMain.handle('ssh:disconnect', (_e, sessionId: string) => {
+  ipcMain.handle('ssh:disconnect', (_e, sessionId: string, meta?: { serverId: string; serverName: string; host: string; username: string; connectedAt?: number }) => {
     disconnectSSH(sessionId)
+    if (meta) {
+      const duration = meta.connectedAt ? Date.now() - meta.connectedAt : undefined
+      const entry = addLogEntry({ type: 'disconnect', ...meta, duration })
+      const win = BrowserWindow.getAllWindows()[0]
+      win?.webContents.send('log:new', entry)
+      sendRemoteLog(entry)
+    }
     return true
   })
 

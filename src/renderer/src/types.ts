@@ -38,6 +38,7 @@ export interface AppSettings {
   cursorBlink: boolean
   scrollback: number
   bellStyle: 'none' | 'sound' | 'visual'
+  remoteLogConfig?: RemoteLogConfig
 }
 
 export interface Tab {
@@ -49,6 +50,7 @@ export interface Tab {
   status: 'connecting' | 'connected' | 'disconnected' | 'error'
   errorMessage?: string
   mode: 'terminal' | 'sftp'
+  connectedAt?: number
 }
 
 export interface SFTPEntry {
@@ -61,10 +63,38 @@ export interface SFTPEntry {
   group: number
 }
 
+export interface LogEntry {
+  id: string
+  timestamp: number
+  type: 'connect' | 'disconnect' | 'error' | 'auth_fail'
+  serverId: string
+  serverName: string
+  host: string
+  username: string
+  duration?: number
+  message?: string
+}
+
+export interface RemoteLogConfig {
+  enabled: boolean
+  provider: 'graylog' | 'loki' | 'syslog' | 'elasticsearch'
+  host: string
+  port: number
+  token?: string
+  index?: string
+  tls?: boolean
+}
+
 export type Theme = 'dark' | 'light'
+export type NavPage = 'hosts' | 'keys' | 'logs' | 'export' | 'terminal'
 
 export const SERVER_COLORS = [
-  '#58a6ff', '#3fb950', '#d29922', '#f85149',
-  '#bc8cff', '#ff7b72', '#ffa657', '#79c0ff',
-  '#56d364', '#e3b341', '#f78166', '#d2a8ff'
+  '#4c74ff', '#30d48a', '#f7b731', '#ff5757',
+  '#a77bff', '#ff8c42', '#00bcd4', '#e91e8c',
+  '#ff6b6b', '#48dbfb', '#6c5ce7', '#fd79a8'
+]
+
+export const HOST_ICON_COLORS = [
+  '#e84040', '#e87040', '#e8a040', '#40a8e8',
+  '#4065e8', '#7340e8', '#40e87b', '#e84095'
 ]
