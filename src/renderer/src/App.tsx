@@ -33,7 +33,7 @@ export default function App() {
         window.api.settings.get()
       ])
       setServers(serverList)
-      setGroups(groupList)
+      setGroups(groupList.slice().sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999)))
       setKeys(keyList)
       setSettings(settingsData)
       const themeId = settingsData.themeId ?? 'navy'

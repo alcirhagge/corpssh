@@ -28,6 +28,7 @@ export interface Group {
   name: string
   color?: string
   expanded?: boolean
+  sortOrder?: number
 }
 
 export interface SSHKey {

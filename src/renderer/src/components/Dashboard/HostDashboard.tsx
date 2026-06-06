@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { Plus, Search, ChevronDown, Grid, List, Terminal, Folder, FolderOpen, MoreHorizontal, Trash2, FolderPlus, Monitor } from 'lucide-react'
 
 function WindowsIcon({ size = 20 }: { size?: number }) {
@@ -51,7 +51,7 @@ function getInitials(name: string): string {
 }
 
 export default function HostDashboard({ onConnect }: HostDashboardProps) {
-  const { servers, groups, setRightPanel, upsertGroup, removeServer, removeGroup, activePage } = useAppStore()
+  const { servers, groups, setGroups, setRightPanel, upsertGroup, removeServer, removeGroup, activePage } = useAppStore()
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
@@ -59,6 +59,8 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
   const [serverMenuId, setServerMenuId] = useState<string | null>(null)
   const [addingGroup, setAddingGroup] = useState(false)
   const [newGroupName, setNewGroupName] = useState('')
+  const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null)
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null)
 
   const filtered = useMemo(() => {
     if (!search.trim()) return servers
@@ -110,6 +112,25 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
     setGroupMenuId(null)
   }
 
+  const handleGroupDragStart = (id: string) => setDraggingGroupId(id)
+  const handleGroupDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault()
+    if (id !== draggingGroupId) setDragOverGroupId(id)
+  }
+  const handleGroupDragEnd = () => { setDraggingGroupId(null); setDragOverGroupId(null) }
+  const handleGroupDrop = (targetId: string) => {
+    if (!draggingGroupId || draggingGroupId === targetId) return
+    const next = [...groups]
+    const from = next.findIndex(g => g.id === draggingGroupId)
+    const to = next.findIndex(g => g.id === targetId)
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    setGroups(next)
+    next.forEach((g, i) => window.api.groups.save({ ...g, sortOrder: i }).catch(() => {}))
+    setDraggingGroupId(null)
+    setDragOverGroupId(null)
+  }
+
   return (
     <div
       className="flex flex-col flex-1 overflow-hidden"
@@ -118,29 +139,29 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
     >
       {/* Toolbar */}
       <div
-        className="flex items-center gap-2 px-4 py-2.5 flex-shrink-0"
+        className="flex items-center gap-2 px-4 py-3 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}
       >
         {/* Search */}
         <div className="relative flex-1">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar host ou ssh user@hostname..."
-            style={{ paddingLeft: 32, background: 'var(--bg-input)', fontSize: 12 }}
+            style={{ paddingLeft: 34, background: 'var(--bg-input)', fontSize: 13 }}
           />
         </div>
 
         {/* New Host */}
         <button
           onClick={() => setRightPanel({ mode: 'new' })}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
-          style={{ background: 'var(--accent)', color: '#fff' }}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
+          style={{ background: 'var(--accent)', color: '#fff', whiteSpace: 'nowrap' }}
           onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-hover)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--accent)')}
         >
-          <Plus size={13} />
+          <Plus size={15} />
           New Host
         </button>
 
@@ -156,36 +177,36 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
             }}
             onBlur={commitNewGroup}
             placeholder="Nome do grupo..."
-            style={{ width: 140, fontSize: 12, padding: '4px 8px' }}
+            style={{ width: 140, fontSize: 13, padding: '5px 10px' }}
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
           <button
             onClick={(e) => { e.stopPropagation(); setAddingGroup(true) }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg"
             style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
             onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
             title="Novo Grupo"
           >
-            <FolderPlus size={13} />
+            <FolderPlus size={15} />
           </button>
         )}
 
-        <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
+        <div style={{ width: 1, height: 22, background: 'var(--border)' }} />
 
         {/* View toggle */}
         {(['grid', 'list'] as const).map((mode) => (
           <button
             key={mode}
             onClick={() => setViewMode(mode)}
-            className="flex items-center justify-center w-7 h-7 rounded"
+            className="flex items-center justify-center w-9 h-9 rounded"
             style={{
               background: viewMode === mode ? 'var(--bg-active)' : 'transparent',
               color: viewMode === mode ? 'var(--text-primary)' : 'var(--text-muted)'
             }}
           >
-            {mode === 'grid' ? <Grid size={13} /> : <List size={13} />}
+            {mode === 'grid' ? <Grid size={15} /> : <List size={15} />}
           </button>
         ))}
       </div>
@@ -207,7 +228,18 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
               if (items.length === 0 && search) return null
               const collapsed = collapsedGroups.has(group.id)
               return (
-                <div key={group.id} className="mb-5">
+                <div
+                  key={group.id}
+                  className="mb-5"
+                  style={{
+                    opacity: draggingGroupId === group.id ? 0.4 : 1,
+                    outline: dragOverGroupId === group.id ? '2px dashed var(--accent)' : 'none',
+                    borderRadius: 8,
+                    transition: 'opacity 0.15s'
+                  }}
+                  onDragOver={(e) => handleGroupDragOver(e, group.id)}
+                  onDrop={() => handleGroupDrop(group.id)}
+                >
                   <GroupHeader
                     group={group}
                     count={items.length}
@@ -218,6 +250,8 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
                     menuOpen={groupMenuId === group.id}
                     onMenuOpen={(e) => { e.stopPropagation(); setGroupMenuId(group.id) }}
                     onMenuClose={() => setGroupMenuId(null)}
+                    onDragStart={() => handleGroupDragStart(group.id)}
+                    onDragEnd={handleGroupDragEnd}
                   />
                   {!collapsed && (
                     <HostGrid
@@ -263,41 +297,48 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
   )
 }
 
-function GroupHeader({ group, count, collapsed, onToggle, onAddHost, onDelete, menuOpen, onMenuOpen, onMenuClose }: {
+function GroupHeader({ group, count, collapsed, onToggle, onAddHost, onDelete, menuOpen, onMenuOpen, onMenuClose, onDragStart, onDragEnd }: {
   group: Group; count: number; collapsed: boolean
   onToggle: () => void; onAddHost: () => void; onDelete: () => void
   menuOpen: boolean; onMenuOpen: (e: React.MouseEvent) => void; onMenuClose: () => void
+  onDragStart: () => void; onDragEnd: () => void
 }) {
   return (
-    <div className="flex items-center gap-2 mb-2 relative">
+    <div
+      className="flex items-center gap-2 mb-2 relative"
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      style={{ cursor: 'grab' }}
+    >
       <button
         onClick={onToggle}
         className="flex items-center gap-2 flex-1"
-        style={{ background: 'none', color: 'var(--text-secondary)' }}
+        style={{ background: 'none', color: 'var(--text-secondary)', cursor: 'grab' }}
       >
         <span style={{ color: group.color ?? 'var(--text-muted)' }}>
-          {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
+          {collapsed ? <Folder size={15} /> : <FolderOpen size={15} />}
         </span>
-        <span className="text-xs font-semibold uppercase tracking-wider" style={{ fontSize: 12 }}>{group.name}</span>
+        <span className="font-semibold uppercase tracking-wider" style={{ fontSize: 13 }}>{group.name}</span>
         <span
-          className="text-xs px-1.5 rounded"
-          style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)', fontSize: 11 }}
+          className="px-1.5 rounded"
+          style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)', fontSize: 12 }}
         >
           {count}
         </span>
         <ChevronDown
-          size={12}
+          size={13}
           style={{ color: 'var(--text-muted)', transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 0.15s' }}
         />
       </button>
       <button
         onClick={onMenuOpen}
-        className="flex items-center justify-center w-6 h-6 rounded"
-        style={{ color: 'var(--text-muted)', background: 'transparent' }}
+        className="flex items-center justify-center w-7 h-7 rounded"
+        style={{ color: 'var(--text-muted)', background: 'transparent', cursor: 'pointer' }}
         onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
-        <MoreHorizontal size={13} />
+        <MoreHorizontal size={15} />
       </button>
       {menuOpen && (
         <DropMenu onClose={onMenuClose} items={[
@@ -386,6 +427,17 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
   const [hovered, setHovered] = useState(false)
   const color = getIconColor(server)
   const initials = getInitials(server.name)
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleClick = () => {
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current)
+      clickTimer.current = null
+      onConnect()
+    } else {
+      clickTimer.current = setTimeout(() => { clickTimer.current = null; onEdit() }, 220)
+    }
+  }
 
   return (
     <div
@@ -398,7 +450,7 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onDoubleClick={onConnect}
+      onClick={handleClick}
     >
       {/* Color accent line at top */}
       <div style={{ height: 3, background: `linear-gradient(90deg, ${color}, ${color}66)` }} />
@@ -472,6 +524,17 @@ function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, on
 }) {
   const [hovered, setHovered] = useState(false)
   const color = getIconColor(server)
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleClick = () => {
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current)
+      clickTimer.current = null
+      onConnect()
+    } else {
+      clickTimer.current = setTimeout(() => { clickTimer.current = null; onEdit() }, 220)
+    }
+  }
 
   return (
     <div
@@ -483,7 +546,7 @@ function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, on
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onDoubleClick={onConnect}
+      onClick={handleClick}
     >
       <div
         className="host-icon"

@@ -18,8 +18,8 @@ export default function TabBar({ onCloseTab }: TabBarProps) {
       style={{
         background: 'var(--tabbar-bg)',
         borderBottom: '1px solid var(--border)',
-        height: 38,
-        minHeight: 38
+        height: 46,
+        minHeight: 46
       }}
     >
       {tabs.map(tab => (
@@ -72,16 +72,17 @@ function TabItem({
 
       {/* Icon */}
       <span style={{ color: tab.mode === 'sftp' ? 'var(--purple)' : 'var(--accent)', flexShrink: 0 }}>
-        {tab.mode === 'sftp' ? <FolderOpen size={13} /> : <Terminal size={13} />}
+        {tab.mode === 'sftp' ? <FolderOpen size={15} /> : <Terminal size={15} />}
       </span>
 
       {/* Status dot */}
-      <div className={`status-dot ${tab.status} flex-shrink-0`} style={{ width: 6, height: 6 }} />
+      <div className={`status-dot ${tab.status} flex-shrink-0`} style={{ width: 7, height: 7 }} />
 
       {/* Label */}
-      <span className="text-xs truncate" style={{
+      <span className="truncate" style={{
+        fontSize: 13,
         color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-        maxWidth: 120
+        maxWidth: 130
       }}>
         {tab.serverName}
       </span>
@@ -89,7 +90,7 @@ function TabItem({
       {/* Close */}
       <button
         onClick={e => { e.stopPropagation(); onClose() }}
-        className="flex items-center justify-center w-5 h-5 rounded flex-shrink-0"
+        className="flex items-center justify-center w-6 h-6 rounded flex-shrink-0"
         style={{
           color: 'var(--text-muted)',
           background: 'transparent',
@@ -99,7 +100,7 @@ function TabItem({
         onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-active)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
       >
-        <X size={12} />
+        <X size={14} />
       </button>
     </div>
   )
