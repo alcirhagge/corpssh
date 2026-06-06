@@ -145,8 +145,8 @@ export default function App() {
         {/* Main content */}
         <div className="flex flex-col flex-1 overflow-hidden">
 
-          {/* Terminal tabs (always rendered when terminal page) */}
-          {showTerminal && (
+          {/* Terminal tabs — só visível na página terminal */}
+          {showTerminal && tabs.length > 0 && (
             <TabBar onCloseTab={handleCloseTab} />
           )}
 
@@ -160,50 +160,56 @@ export default function App() {
               </>
             )}
 
-            {/* Terminal sessions */}
-            {showTerminal && (
-              <div className="flex-1 overflow-hidden relative">
-                {tabs.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-3" style={{ color: 'var(--text-muted)' }}>
-                    <p className="text-sm">Nenhuma sessao ativa</p>
-                    <button
-                      onClick={() => setActivePage('hosts')}
-                      className="px-3 py-1.5 rounded-lg text-xs"
-                      style={{ background: 'var(--accent)', color: '#fff' }}
-                    >
-                      Ir para Hosts
-                    </button>
+            {/* Terminal sessions — SEMPRE no DOM quando há tabs, só esconde visualmente.
+                Isso evita que o TerminalPane seja desmontado ao navegar para outra página,
+                o que causaria reinício do shell e perda do histórico. */}
+            {tabs.length > 0 && (
+              <div
+                className="flex-1 overflow-hidden relative"
+                style={{ display: showTerminal ? 'block' : 'none' }}
+              >
+                {tabs.map((tab) => (
+                  <div
+                    key={tab.id}
+                    className="absolute inset-0"
+                    style={{
+                      visibility: tab.id === activeTabId ? 'visible' : 'hidden',
+                      pointerEvents: tab.id === activeTabId ? 'auto' : 'none'
+                    }}
+                  >
+                    {tab.status === 'connecting' && <LoadingScreen name={tab.serverName} host={tab.serverHost} />}
+                    {tab.status === 'error' && (
+                      <ErrorScreen
+                        name={tab.serverName}
+                        error={tab.errorMessage ?? 'Erro desconhecido'}
+                        onRetry={() => {
+                          const server = servers.find((s) => s.id === tab.serverId)
+                          if (server) { removeTab(tab.id); handleConnectServer(server) }
+                        }}
+                        onClose={() => handleCloseTab(tab)}
+                      />
+                    )}
+                    {tab.status === 'connected' && tab.sessionId && (
+                      tab.mode === 'sftp'
+                        ? <SFTPBrowser tab={tab} />
+                        : <TerminalPane tab={tab} isActive={tab.id === activeTabId} isPageVisible={showTerminal} />
+                    )}
                   </div>
-                ) : (
-                  tabs.map((tab) => (
-                    <div
-                      key={tab.id}
-                      className="absolute inset-0"
-                      style={{
-                        visibility: tab.id === activeTabId ? 'visible' : 'hidden',
-                        pointerEvents: tab.id === activeTabId ? 'auto' : 'none'
-                      }}
-                    >
-                      {tab.status === 'connecting' && <LoadingScreen name={tab.serverName} host={tab.serverHost} />}
-                      {tab.status === 'error' && (
-                        <ErrorScreen
-                          name={tab.serverName}
-                          error={tab.errorMessage ?? 'Erro desconhecido'}
-                          onRetry={() => {
-                            const server = servers.find((s) => s.id === tab.serverId)
-                            if (server) { removeTab(tab.id); handleConnectServer(server) }
-                          }}
-                          onClose={() => handleCloseTab(tab)}
-                        />
-                      )}
-                      {tab.status === 'connected' && tab.sessionId && (
-                        tab.mode === 'sftp'
-                          ? <SFTPBrowser tab={tab} />
-                          : <TerminalPane tab={tab} isActive={tab.id === activeTabId} />
-                      )}
-                    </div>
-                  ))
-                )}
+                ))}
+              </div>
+            )}
+
+            {/* Estado vazio da página terminal */}
+            {showTerminal && tabs.length === 0 && (
+              <div className="flex flex-col items-center justify-center flex-1 gap-3" style={{ color: 'var(--text-muted)' }}>
+                <p className="text-sm">Nenhuma sessao ativa</p>
+                <button
+                  onClick={() => setActivePage('hosts')}
+                  className="px-3 py-1.5 rounded-lg text-xs"
+                  style={{ background: 'var(--accent)', color: '#fff' }}
+                >
+                  Ir para Hosts
+                </button>
               </div>
             )}
 

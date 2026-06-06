@@ -11,9 +11,10 @@ import { Search, X, ChevronDown, ChevronUp } from 'lucide-react'
 interface TerminalPaneProps {
   tab: Tab
   isActive: boolean
+  isPageVisible: boolean
 }
 
-export default function TerminalPane({ tab, isActive }: TerminalPaneProps) {
+export default function TerminalPane({ tab, isActive, isPageVisible }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -54,6 +55,8 @@ export default function TerminalPane({ tab, isActive }: TerminalPaneProps) {
   useEffect(() => {
     if (!containerRef.current || !tab.sessionId) return
 
+    const container = containerRef.current
+
     const fitAddon = new FitAddon()
     const webLinksAddon = new WebLinksAddon()
     const searchAddon = new SearchAddon()
@@ -73,13 +76,14 @@ export default function TerminalPane({ tab, isActive }: TerminalPaneProps) {
     terminal.loadAddon(fitAddon)
     terminal.loadAddon(webLinksAddon)
     terminal.loadAddon(searchAddon)
-    terminal.open(containerRef.current)
+    terminal.open(container)
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
     searchAddonRef.current = searchAddon
 
-    // Copy/paste
+    // Copy: Ctrl+C with selection, Ctrl+Shift+C
+    // Paste: block \x16 from going to SSH — the paste DOM event handles the actual paste
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && terminal.hasSelection()) {
@@ -91,13 +95,22 @@ export default function TerminalPane({ tab, isActive }: TerminalPaneProps) {
         return false
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
-        navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text) }).catch(() => {})
-        return false
+        return false  // block \x16; paste event below handles actual paste
       }
       return true
     })
 
-    containerRef.current?.addEventListener('contextmenu', () => {
+    // Single paste handler (capture phase = intercepts before xterm's own handler)
+    const onPaste = (e: ClipboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const text = e.clipboardData?.getData('text/plain')
+      if (text) terminal.paste(text)
+    }
+    container.addEventListener('paste', onPaste, true)
+
+    // Right-click paste
+    container.addEventListener('contextmenu', () => {
       navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text) }).catch(() => {})
     })
 
@@ -126,7 +139,6 @@ export default function TerminalPane({ tab, isActive }: TerminalPaneProps) {
       terminal.write('\r\n\x1b[33m[Sessão encerrada]\x1b[0m\r\n')
     })
 
-    // Resize observer — only for resizing after shell is open
     let shellOpened = false
     const resizeObserver = new ResizeObserver(() => {
       if (!shellOpened) return
@@ -134,9 +146,8 @@ export default function TerminalPane({ tab, isActive }: TerminalPaneProps) {
       const dims = fitAddon.proposeDimensions()
       if (dims && tab.sessionId) window.api.ssh.resize(tab.sessionId, dims.cols, dims.rows)
     })
-    if (containerRef.current) resizeObserver.observe(containerRef.current)
+    resizeObserver.observe(container)
 
-    // Open shell after a short delay to ensure container is laid out
     const timer = setTimeout(() => {
       if (!containerRef.current) return
       fitAddon.fit()
@@ -155,20 +166,21 @@ export default function TerminalPane({ tab, isActive }: TerminalPaneProps) {
       unsubData()
       unsubClosed()
       resizeObserver.disconnect()
+      container.removeEventListener('paste', onPaste, true)
       terminal.dispose()
       terminalRef.current = null
     }
   }, [tab.sessionId])
 
-  // Refit + focus when tab becomes active
+  // Refit + focus when tab becomes active OR when terminal page becomes visible
   useEffect(() => {
-    if (!isActive || !terminalRef.current || !fitAddonRef.current) return
+    if (!isActive || !isPageVisible || !terminalRef.current || !fitAddonRef.current) return
     requestAnimationFrame(() => {
       fitAddonRef.current?.fit()
       terminalRef.current?.refresh(0, terminalRef.current.rows - 1)
       terminalRef.current?.focus()
     })
-  }, [isActive])
+  }, [isActive, isPageVisible])
 
   const handleSearch = (direction: 'next' | 'prev') => {
     if (!searchAddonRef.current || !searchQuery) return
@@ -177,7 +189,6 @@ export default function TerminalPane({ tab, isActive }: TerminalPaneProps) {
   }
 
   return (
-    // Use absolute positioning so container dimensions are always defined
     <div style={{ position: 'absolute', inset: 0, background: 'var(--terminal-bg)' }}>
       {showSearch && (
         <div
