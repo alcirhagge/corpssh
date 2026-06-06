@@ -105,13 +105,13 @@ export default function TitleBar() {
 
         {/* Window controls */}
         <WinBtn onClick={() => window.api.window.minimize()} title="Minimizar" hoverColor="var(--bg-hover)">
-          <Minus size={12} />
+          <Minus size={15} />
         </WinBtn>
         <WinBtn onClick={() => window.api.window.maximize()} title={isMaximized ? 'Restaurar' : 'Maximizar'} hoverColor="var(--bg-hover)">
-          {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          {isMaximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
         </WinBtn>
         <WinBtn onClick={() => window.api.window.close()} title="Fechar" hoverColor="var(--error)" hoverTextColor="#fff">
-          <X size={12} />
+          <X size={15} />
         </WinBtn>
       </div>
     </div>
@@ -155,7 +155,7 @@ function WinBtn({ children, onClick, title, hoverColor, hoverTextColor }: {
     <button
       onClick={onClick}
       title={title}
-      className="flex items-center justify-center w-8 h-8 rounded"
+      className="flex items-center justify-center w-10 h-10 rounded"
       style={{ color: 'var(--text-secondary)', background: 'transparent' }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = hoverColor

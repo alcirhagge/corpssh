@@ -89,17 +89,17 @@ function TabItem({
       {/* Close */}
       <button
         onClick={e => { e.stopPropagation(); onClose() }}
-        className="flex items-center justify-center w-4 h-4 rounded flex-shrink-0"
+        className="flex items-center justify-center w-5 h-5 rounded flex-shrink-0"
         style={{
           color: 'var(--text-muted)',
           background: 'transparent',
-          opacity: hovered || isActive ? 1 : 0,
+          opacity: hovered || isActive ? 1 : 0.3,
           transition: 'opacity 0.1s'
         }}
         onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-active)')}
         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
       >
-        <X size={10} />
+        <X size={12} />
       </button>
     </div>
   )

@@ -1,5 +1,33 @@
 import { useState, useMemo } from 'react'
 import { Plus, Search, ChevronDown, Grid, List, Terminal, Folder, FolderOpen, MoreHorizontal, Trash2, FolderPlus, Monitor } from 'lucide-react'
+
+function WindowsIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M1 3.2L8.8 2.1V9.5H1V3.2Z" fill="white" opacity="0.92"/>
+      <path d="M9.8 1.9L19 0.6V9.5H9.8V1.9Z" fill="white" opacity="0.92"/>
+      <path d="M1 10.5H8.8V17.9L1 16.8V10.5Z" fill="white" opacity="0.92"/>
+      <path d="M9.8 10.5H19V19.4L9.8 18.1V10.5Z" fill="white" opacity="0.92"/>
+    </svg>
+  )
+}
+
+function LinuxIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="white" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="10" cy="10" r="8.5" fill="none" stroke="white" strokeWidth="1.4" opacity="0.7"/>
+      <circle cx="10" cy="4.2" r="2.2" fill="white" opacity="0.95"/>
+      <circle cx="4.6" cy="13.8" r="2.2" fill="white" opacity="0.95"/>
+      <circle cx="15.4" cy="13.8" r="2.2" fill="white" opacity="0.95"/>
+    </svg>
+  )
+}
+
+function OsIcon({ protocol }: { protocol: string }) {
+  if (protocol === 'rdp') return <WindowsIcon size={20} />
+  if (protocol === 'vnc') return <Monitor size={18} color="white" opacity={0.9} />
+  return <LinuxIcon size={20} />
+}
 import { useAppStore } from '../../store/appStore'
 import type { Server as ServerType, Group } from '../../types'
 import { HOST_ICON_COLORS } from '../../types'
@@ -386,7 +414,7 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
               fontSize: 13, fontWeight: 700, borderRadius: 10
             }}
           >
-            {initials}
+            <OsIcon protocol={server.protocol ?? 'ssh'} />
           </div>
           <div className="flex items-center gap-1">
             {hovered && (
@@ -395,8 +423,8 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
                 className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium"
                 style={{ background: 'var(--accent)', color: '#fff', fontSize: 11 }}
               >
-                <Terminal size={10} />
-                SSH
+                {server.protocol === 'ssh' ? <Terminal size={10} /> : <Monitor size={10} />}
+                {(server.protocol ?? 'ssh').toUpperCase()}
               </button>
             )}
             <button
@@ -461,7 +489,7 @@ function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, on
         className="host-icon"
         style={{ width: 32, height: 32, background: `linear-gradient(135deg, ${color}, ${color}bb)`, fontSize: 11 }}
       >
-        {getInitials(server.name)}
+        <OsIcon protocol={server.protocol ?? 'ssh'} />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
@@ -478,7 +506,8 @@ function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, on
           className="flex items-center gap-1 px-2 py-1 rounded text-xs"
           style={{ background: 'var(--accent)', color: '#fff' }}
         >
-          <Terminal size={11} />SSH
+          {server.protocol === 'ssh' ? <Terminal size={11} /> : <Monitor size={11} />}
+          {(server.protocol ?? 'ssh').toUpperCase()}
         </button>
       )}
       <button
