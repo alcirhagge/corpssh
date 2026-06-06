@@ -1,5 +1,5 @@
 import * as fs from 'fs'
-import { getServers, getGroups, type ServerRecord, type GroupRecord } from './store'
+import type { ServerRecord, GroupRecord } from './store'
 
 export function exportToXML(servers: ServerRecord[], groups: GroupRecord[]): string {
   const groupsXml = groups.map((g) =>

@@ -115,8 +115,8 @@ export function setupIpcHandlers(): void {
     if (result.canceled || !result.filePaths.length) return null
     const xml = require('fs').readFileSync(result.filePaths[0], 'utf-8')
     const data = importFromXML(xml)
-    data.groups.forEach(g => { if (!g.id) g.id = generateId(); require('./store').saveGroup(g) })
-    data.servers.forEach(s => { if (!s.id) s.id = generateId(); require('./store').saveServer(s) })
+    data.groups.forEach(g => { if (!g.id) g.id = generateId(); saveGroup(g) })
+    data.servers.forEach(s => { if (!s.id) s.id = generateId(); saveServer(s) })
     return data
   })
 
