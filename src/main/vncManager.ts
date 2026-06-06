@@ -41,6 +41,10 @@ export function createVNCProxy(
   })
 }
 
+function toFileUrl(p: string): string {
+  return 'file:///' + p.replace(/\\/g, '/')
+}
+
 export function openVNCWindow(
   sessionId: string,
   wsPort: number,
@@ -48,15 +52,13 @@ export function openVNCWindow(
   host: string,
   password?: string
 ): void {
-  const params = new URLSearchParams({
-    port: String(wsPort),
-    host: `${serverName} (${host})`,
-    password: password ?? ''
-  })
-
   const htmlPath = is.dev
     ? path.join(process.cwd(), 'resources', 'vnc-viewer.html')
     : path.join(process.resourcesPath, 'vnc-viewer.html')
+
+  const novncCorePath = is.dev
+    ? path.join(process.cwd(), 'node_modules', '@novnc', 'novnc', 'core')
+    : path.join(process.resourcesPath, 'novnc', 'core')
 
   const win = new BrowserWindow({
     width: 1280,
@@ -73,7 +75,14 @@ export function openVNCWindow(
     }
   })
 
-  win.loadURL(`file://${htmlPath}?${params.toString()}`)
+  win.loadFile(htmlPath, {
+    query: {
+      port: String(wsPort),
+      host: `${serverName} (${host})`,
+      password: password ?? '',
+      rfbUrl: toFileUrl(path.join(novncCorePath, 'rfb.js'))
+    }
+  })
 
   const entry = activeProxies.get(sessionId)
   if (entry) activeProxies.set(sessionId, { ...entry, win })

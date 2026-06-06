@@ -75,7 +75,7 @@
     <span id="host-label" class="host">VNC</span>
     <div class="spacer"></div>
     <button id="btn-keys" title="Enviar Ctrl+Alt+Del">Ctrl+Alt+Del</button>
-    <button id="btn-clipboard" id="btn-keys">Clipboard</button>
+    <button id="btn-clipboard">Clipboard</button>
     <button id="btn-fullscreen">Tela Cheia</button>
     <button id="btn-disconnect">Desconectar</button>
   </div>
@@ -99,23 +99,24 @@
   </div>
 
   <script type="module">
-    import RFB from 'https://cdn.jsdelivr.net/npm/@novnc/novnc@1.4.0/core/rfb.js'
-
     const params = new URLSearchParams(window.location.search)
-    const wsPort  = params.get('port')
-    const host    = params.get('host') || 'VNC'
+    const wsPort   = params.get('port')
+    const host     = params.get('host') || 'VNC'
     const password = params.get('password') || ''
+    const rfbUrl   = params.get('rfbUrl')
 
     document.getElementById('host-label').textContent = host
 
-    const screen = document.getElementById('screen')
-    const statusEl = document.getElementById('status')
+    const screen    = document.getElementById('screen')
+    const statusEl  = document.getElementById('status')
     const statusText = document.getElementById('status-text')
 
     let rfb = null
 
-    function connect() {
+    async function connect() {
       try {
+        const { default: RFB } = await import(rfbUrl)
+
         rfb = new RFB(screen, `ws://127.0.0.1:${wsPort}`, {
           credentials: { password },
           wsProtocols: ['binary']
@@ -150,7 +151,6 @@
       }
     }
 
-    // Controls
     document.getElementById('btn-keys').addEventListener('click', () => {
       rfb?.sendCtrlAltDel()
     })
