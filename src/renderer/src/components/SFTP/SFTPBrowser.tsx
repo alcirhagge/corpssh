@@ -1,307 +1,391 @@
 import { useState, useEffect, useCallback } from 'react'
-import {
-  Folder, File, Upload, Download, Trash2, RefreshCw,
-  ChevronRight, Home, ArrowLeft, FolderOpen
-} from 'lucide-react'
-import type { Tab, SFTPEntry } from '../../types'
+import { Folder, File, RefreshCw, ArrowLeft, ArrowRight, FolderOpen, AlertCircle } from 'lucide-react'
+import type { Tab } from '../../types'
+
+interface PaneEntry {
+  name: string
+  type: 'file' | 'directory'
+  size: number
+  modifyTime: number
+}
 
 interface SFTPBrowserProps {
   tab: Tab
 }
 
 function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
+  if (!bytes || bytes === 0) return '—'
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
 }
 
-function formatDate(ts: number): string {
-  return new Date(ts * 1000).toLocaleDateString('pt-BR', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-  })
+const getParent = (p: string): string | null => {
+  if (p.includes('\\')) {
+    const normalized = p.replace(/\\+$/, '')
+    const idx = normalized.lastIndexOf('\\')
+    if (idx < 0) return null
+    const parent = normalized.slice(0, idx + 1)
+    if (parent.toLowerCase() === normalized.toLowerCase() + '\\') return null
+    return parent
+  }
+  const parts = p.split('/').filter(Boolean)
+  if (parts.length === 0) return null
+  return '/' + parts.slice(0, -1).join('/')
 }
 
-export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
-  const [currentPath, setCurrentPath] = useState('/')
-  const [entries, setEntries] = useState<SFTPEntry[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [history, setHistory] = useState<string[]>(['/'])
+const joinPath = (base: string, name: string): string => {
+  if (base.includes('\\')) {
+    return base.replace(/\\+$/, '') + '\\' + name
+  }
+  return (base === '/' ? '' : base) + '/' + name
+}
 
-  const loadDirectory = useCallback(async (path: string) => {
+const sortEntries = (list: PaneEntry[]) =>
+  [...list].sort((a, b) => {
+    if (a.type === 'directory' && b.type !== 'directory') return -1
+    if (b.type === 'directory' && a.type !== 'directory') return 1
+    return a.name.localeCompare(b.name)
+  })
+
+export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
+  const [remotePath, setRemotePath] = useState('/')
+  const [remoteEntries, setRemoteEntries] = useState<PaneEntry[]>([])
+  const [remoteLoading, setRemoteLoading] = useState(false)
+  const [selectedRemote, setSelectedRemote] = useState<PaneEntry | null>(null)
+
+  const [localPath, setLocalPath] = useState('')
+  const [localEntries, setLocalEntries] = useState<PaneEntry[]>([])
+  const [localLoading, setLocalLoading] = useState(false)
+  const [selectedLocal, setSelectedLocal] = useState<PaneEntry | null>(null)
+
+  const [error, setError] = useState<string | null>(null)
+  const [transferring, setTransferring] = useState(false)
+  const [transferMsg, setTransferMsg] = useState('')
+
+  const loadRemote = useCallback(async (path: string) => {
     if (!tab.sessionId) return
-    setLoading(true)
+    setRemoteLoading(true)
     setError(null)
-    setSelected(new Set())
+    setSelectedRemote(null)
     try {
       const list = await window.api.sftp.list(tab.sessionId, path)
-      setEntries(list)
-      setCurrentPath(path)
+      setRemoteEntries(sortEntries(list as PaneEntry[]))
+      setRemotePath(path)
     } catch (e: any) {
-      setError(e.message || 'Erro ao listar diretório')
+      setError(`Servidor: ${e.message}`)
     } finally {
-      setLoading(false)
+      setRemoteLoading(false)
     }
   }, [tab.sessionId])
 
-  useEffect(() => {
-    loadDirectory('/')
-  }, [loadDirectory])
-
-  const navigateTo = (path: string) => {
-    setHistory(prev => [...prev, currentPath])
-    loadDirectory(path)
-  }
-
-  const navigateBack = () => {
-    const prev = history[history.length - 1]
-    if (prev) {
-      setHistory(h => h.slice(0, -1))
-      loadDirectory(prev)
-    }
-  }
-
-  const pathParts = currentPath.split('/').filter(Boolean)
-
-  const handleDownload = async (entry: SFTPEntry) => {
-    if (!tab.sessionId || entry.type === 'directory') return
-    const remotePath = `${currentPath}/${entry.name}`.replace('//', '/')
+  const loadLocal = useCallback(async (path: string) => {
+    setLocalLoading(true)
+    setSelectedLocal(null)
     try {
-      await window.api.sftp.download(tab.sessionId, remotePath)
+      const list = await window.api.local.list(path)
+      setLocalEntries(sortEntries(list as PaneEntry[]))
+      setLocalPath(path)
     } catch (e: any) {
-      setError(e.message)
+      setError(`Local: ${e.message}`)
+    } finally {
+      setLocalLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    loadRemote('/')
+    window.api.local.homedir().then((home) => loadLocal(home))
+  }, [loadRemote, loadLocal])
 
   const handleUpload = async () => {
-    if (!tab.sessionId) return
+    if (!selectedLocal || selectedLocal.type !== 'file' || !tab.sessionId) return
+    setTransferring(true)
+    setTransferMsg(`Enviando ${selectedLocal.name}…`)
+    setError(null)
     try {
-      await window.api.sftp.upload(tab.sessionId, currentPath)
-      loadDirectory(currentPath)
+      const src = joinPath(localPath, selectedLocal.name)
+      const dst = joinPath(remotePath, selectedLocal.name)
+      await window.api.sftp.uploadDirect(tab.sessionId, src, dst)
+      setTransferMsg(`${selectedLocal.name} enviado`)
+      setTimeout(() => setTransferMsg(''), 2500)
+      loadRemote(remotePath)
     } catch (e: any) {
-      setError(e.message)
+      setError(`Upload: ${e.message}`)
+    } finally {
+      setTransferring(false)
     }
   }
 
-  const handleDelete = async (entry: SFTPEntry) => {
-    if (!tab.sessionId) return
-    const remotePath = `${currentPath}/${entry.name}`.replace('//', '/')
+  const handleDownload = async () => {
+    if (!selectedRemote || selectedRemote.type !== 'file' || !tab.sessionId) return
+    setTransferring(true)
+    setTransferMsg(`Baixando ${selectedRemote.name}…`)
+    setError(null)
     try {
-      await window.api.sftp.delete(tab.sessionId, remotePath, entry.type === 'directory')
-      loadDirectory(currentPath)
+      const src = joinPath(remotePath, selectedRemote.name)
+      const dst = joinPath(localPath, selectedRemote.name)
+      await window.api.sftp.downloadDirect(tab.sessionId, src, dst)
+      setTransferMsg(`${selectedRemote.name} baixado`)
+      setTimeout(() => setTransferMsg(''), 2500)
+      loadLocal(localPath)
     } catch (e: any) {
-      setError(e.message)
+      setError(`Download: ${e.message}`)
+    } finally {
+      setTransferring(false)
     }
   }
+
+  const uploadReady = !!selectedLocal && selectedLocal.type === 'file' && !transferring
+  const downloadReady = !!selectedRemote && selectedRemote.type === 'file' && !transferring
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--bg-app)' }}>
-      {/* Toolbar */}
+      {/* Header */}
       <div
-        className="flex items-center gap-2 px-3 py-2"
+        className="flex items-center gap-2 px-3 py-2 flex-shrink-0"
         style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}
       >
-        <button
-          onClick={navigateBack}
-          disabled={history.length <= 1}
-          className="flex items-center justify-center w-7 h-7 rounded"
-          style={{
-            color: history.length <= 1 ? 'var(--text-muted)' : 'var(--text-secondary)',
-            cursor: history.length <= 1 ? 'not-allowed' : 'pointer'
-          }}
-          onMouseEnter={e => history.length > 1 && (e.currentTarget.style.background = 'var(--bg-hover)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-        >
-          <ArrowLeft size={14} />
-        </button>
-
-        <button
-          onClick={() => loadDirectory(currentPath)}
-          className="flex items-center justify-center w-7 h-7 rounded"
-          style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-        >
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-        </button>
-
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-1 flex-1 overflow-x-auto">
-          <button
-            onClick={() => navigateTo('/')}
-            className="flex items-center justify-center w-6 h-6 rounded"
-            style={{ color: 'var(--text-secondary)', flexShrink: 0 }}
-          >
-            <Home size={12} />
-          </button>
-          {pathParts.map((part, i) => {
-            const path = '/' + pathParts.slice(0, i + 1).join('/')
-            return (
-              <div key={path} className="flex items-center gap-1" style={{ flexShrink: 0 }}>
-                <ChevronRight size={11} style={{ color: 'var(--text-muted)' }} />
-                <button
-                  onClick={() => navigateTo(path)}
-                  className="text-xs px-1 rounded hover:underline"
-                  style={{ color: i === pathParts.length - 1 ? 'var(--text-primary)' : 'var(--text-secondary)' }}
-                >
-                  {part}
-                </button>
-              </div>
-            )
-          })}
-        </div>
-
-        <button
-          onClick={handleUpload}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs"
-          style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent)'; e.currentTarget.style.color = '#fff' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'var(--accent-subtle)'; e.currentTarget.style.color = 'var(--accent)' }}
-        >
-          <Upload size={12} />
-          Upload
-        </button>
-      </div>
-
-      {/* Error banner */}
-      {error && (
-        <div className="px-3 py-2 text-xs" style={{ background: 'var(--error-subtle)', color: 'var(--error)' }}>
-          {error}
-        </div>
-      )}
-
-      {/* File list */}
-      <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="flex items-center justify-center h-32 gap-2" style={{ color: 'var(--text-muted)' }}>
-            <RefreshCw size={16} className="animate-spin" />
-            <span className="text-sm">Carregando...</span>
-          </div>
-        ) : entries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 gap-2" style={{ color: 'var(--text-muted)' }}>
-            <FolderOpen size={24} />
-            <span className="text-sm">Pasta vazia</span>
-          </div>
-        ) : (
-          <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                {['Nome', 'Tamanho', 'Modificado', ''].map(h => (
-                  <th
-                    key={h}
-                    className="text-left px-3 py-2 text-xs font-medium"
-                    style={{ color: 'var(--text-muted)', background: 'var(--bg-surface)' }}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map(entry => (
-                <SFTPRow
-                  key={entry.name}
-                  entry={entry}
-                  onOpen={() => {
-                    if (entry.type === 'directory') {
-                      const newPath = `${currentPath}/${entry.name}`.replace('//', '/')
-                      navigateTo(newPath)
-                    }
-                  }}
-                  onDownload={() => handleDownload(entry)}
-                  onDelete={() => handleDelete(entry)}
-                />
-              ))}
-            </tbody>
-          </table>
+        <FolderOpen size={14} style={{ color: 'var(--accent)' }} />
+        <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+          SFTP — {tab.serverName}
+        </span>
+        {transferMsg && (
+          <span className="text-xs" style={{ color: 'var(--success)', marginLeft: 8 }}>
+            {transferMsg}
+          </span>
         )}
       </div>
 
-      {/* Status bar */}
-      <div
-        className="flex items-center justify-between px-3 py-1.5 text-xs"
-        style={{ background: 'var(--bg-surface)', borderTop: '1px solid var(--border)', color: 'var(--text-muted)' }}
-      >
-        <span>{entries.length} item{entries.length !== 1 ? 's' : ''}</span>
-        <span>{currentPath}</span>
+      {/* Error */}
+      {error && (
+        <div
+          className="flex items-center gap-2 px-3 py-1.5 text-xs flex-shrink-0"
+          style={{ background: 'var(--error-subtle)', color: 'var(--error)' }}
+        >
+          <AlertCircle size={12} />
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError(null)} style={{ color: 'var(--error)' }}>×</button>
+        </div>
+      )}
+
+      {/* Split pane */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Local pane */}
+        <FilePane
+          title="LOCAL"
+          path={localPath}
+          entries={localEntries}
+          loading={localLoading}
+          selected={selectedLocal}
+          onNavigate={loadLocal}
+          onSelect={(e) => setSelectedLocal((prev) => prev?.name === e.name ? null : e)}
+          onParent={() => { const p = getParent(localPath); if (p) loadLocal(p) }}
+          canGoParent={!!getParent(localPath)}
+          onRefresh={() => loadLocal(localPath)}
+          currentPath={localPath}
+        />
+
+        {/* Transfer buttons */}
+        <div
+          className="flex flex-col items-center justify-center gap-3"
+          style={{
+            width: 54, flexShrink: 0,
+            borderLeft: '1px solid var(--border)',
+            borderRight: '1px solid var(--border)',
+            background: 'var(--bg-surface)'
+          }}
+        >
+          <button
+            onClick={handleUpload}
+            disabled={!uploadReady}
+            title="Enviar para servidor →"
+            className="flex items-center justify-center rounded-lg"
+            style={{
+              width: 34, height: 34,
+              background: uploadReady ? 'var(--accent)' : 'var(--bg-elevated)',
+              color: uploadReady ? '#fff' : 'var(--text-muted)',
+              opacity: transferring ? 0.5 : 1,
+              transition: 'all 0.15s',
+              cursor: uploadReady ? 'pointer' : 'not-allowed'
+            }}
+          >
+            <ArrowRight size={16} />
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={!downloadReady}
+            title="← Baixar do servidor"
+            className="flex items-center justify-center rounded-lg"
+            style={{
+              width: 34, height: 34,
+              background: downloadReady ? 'var(--accent)' : 'var(--bg-elevated)',
+              color: downloadReady ? '#fff' : 'var(--text-muted)',
+              opacity: transferring ? 0.5 : 1,
+              transition: 'all 0.15s',
+              cursor: downloadReady ? 'pointer' : 'not-allowed'
+            }}
+          >
+            <ArrowLeft size={16} />
+          </button>
+        </div>
+
+        {/* Remote pane */}
+        <FilePane
+          title="SERVIDOR"
+          path={remotePath}
+          entries={remoteEntries}
+          loading={remoteLoading}
+          selected={selectedRemote}
+          onNavigate={loadRemote}
+          onSelect={(e) => setSelectedRemote((prev) => prev?.name === e.name ? null : e)}
+          onParent={() => {
+            const parts = remotePath.split('/').filter(Boolean)
+            if (parts.length > 0) loadRemote('/' + parts.slice(0, -1).join('/') || '/')
+          }}
+          canGoParent={remotePath !== '/'}
+          onRefresh={() => loadRemote(remotePath)}
+          currentPath={remotePath}
+        />
       </div>
     </div>
   )
 }
 
-function SFTPRow({
-  entry, onOpen, onDownload, onDelete
+function FilePane({
+  title, path, entries, loading, selected,
+  onNavigate, onSelect, onParent, canGoParent, onRefresh, currentPath
 }: {
-  entry: SFTPEntry
-  onOpen: () => void
-  onDownload: () => void
-  onDelete: () => void
+  title: string
+  path: string
+  entries: PaneEntry[]
+  loading: boolean
+  selected: PaneEntry | null
+  onNavigate: (path: string) => void
+  onSelect: (entry: PaneEntry) => void
+  onParent: () => void
+  canGoParent: boolean
+  onRefresh: () => void
+  currentPath: string
 }) {
-  const [hovered, setHovered] = useState(false)
-  const isDir = entry.type === 'directory'
+  const displayPath = path.length > 32 ? '…' + path.slice(-30) : path
 
   return (
-    <tr
-      className="cursor-pointer"
-      style={{
-        background: hovered ? 'var(--bg-hover)' : 'transparent',
-        borderBottom: '1px solid var(--border-subtle)',
-        transition: 'background 0.1s'
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onDoubleClick={onOpen}
-    >
-      <td className="px-3 py-2">
-        <div className="flex items-center gap-2">
-          <span style={{ color: isDir ? 'var(--warning)' : 'var(--text-muted)' }}>
-            {isDir ? <Folder size={14} /> : <File size={14} />}
-          </span>
-          <span className="text-xs" style={{ color: 'var(--text-primary)' }}>
-            {entry.name}
-          </span>
-        </div>
-      </td>
-      <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
-        {isDir ? '—' : formatSize(entry.size)}
-      </td>
-      <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
-        {formatDate(entry.modifyTime)}
-      </td>
-      <td className="px-3 py-2">
-        {hovered && (
-          <div className="flex items-center gap-1 justify-end">
-            {!isDir && (
-              <ActionBtn onClick={onDownload} title="Download" color="var(--accent)">
-                <Download size={12} />
-              </ActionBtn>
-            )}
-            <ActionBtn onClick={onDelete} title="Excluir" color="var(--error)">
-              <Trash2 size={12} />
-            </ActionBtn>
+    <div className="flex flex-col flex-1 overflow-hidden" style={{ minWidth: 0 }}>
+      {/* Toolbar */}
+      <div
+        className="flex items-center gap-1 px-2 py-1.5 flex-shrink-0"
+        style={{ background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)' }}
+      >
+        <span
+          className="text-xs font-bold"
+          style={{ color: 'var(--text-muted)', letterSpacing: '0.07em', marginRight: 2 }}
+        >
+          {title}
+        </span>
+        <button
+          onClick={onParent}
+          disabled={!canGoParent}
+          className="flex items-center justify-center w-6 h-6 rounded"
+          style={{
+            color: canGoParent ? 'var(--text-secondary)' : 'var(--text-muted)',
+            cursor: canGoParent ? 'pointer' : 'default',
+            background: 'transparent'
+          }}
+          title="Pasta acima"
+        >
+          <ArrowLeft size={12} />
+        </button>
+        <button
+          onClick={onRefresh}
+          className="flex items-center justify-center w-6 h-6 rounded"
+          style={{ color: 'var(--text-secondary)', background: 'transparent' }}
+          title="Atualizar"
+        >
+          <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
+        </button>
+        <span
+          className="truncate text-xs flex-1"
+          style={{ color: 'var(--text-secondary)', fontSize: 11 }}
+          title={path}
+        >
+          {displayPath}
+        </span>
+      </div>
+
+      {/* File list */}
+      <div className="flex-1 overflow-y-auto">
+        {loading ? (
+          <div className="flex items-center justify-center h-24" style={{ color: 'var(--text-muted)' }}>
+            <RefreshCw size={14} className="animate-spin" />
           </div>
-        )}
-      </td>
-    </tr>
-  )
-}
+        ) : entries.length === 0 ? (
+          <div className="flex items-center justify-center h-24">
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Pasta vazia</span>
+          </div>
+        ) : (
+          entries.map((entry) => {
+            const isDir = entry.type === 'directory'
+            const isSelected = selected?.name === entry.name
 
-function ActionBtn({ children, onClick, title, color }: {
-  children: React.ReactNode; onClick: () => void; title: string; color: string
-}) {
-  return (
-    <button
-      onClick={e => { e.stopPropagation(); onClick() }}
-      title={title}
-      className="flex items-center justify-center w-6 h-6 rounded"
-      style={{ color, background: 'transparent' }}
-      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-active)')}
-      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-    >
-      {children}
-    </button>
+            return (
+              <div
+                key={entry.name}
+                className="flex items-center gap-2 px-2 py-1.5 cursor-pointer"
+                style={{
+                  background: isSelected ? 'var(--accent-subtle)' : 'transparent',
+                  borderLeft: `2px solid ${isSelected ? 'var(--accent)' : 'transparent'}`,
+                  transition: 'background 0.08s'
+                }}
+                onClick={() => {
+                  if (isDir) {
+                    onNavigate(joinPath(currentPath, entry.name))
+                  } else {
+                    onSelect(entry)
+                  }
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected) e.currentTarget.style.background = 'var(--bg-hover)'
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected) e.currentTarget.style.background = 'transparent'
+                }}
+              >
+                <span style={{ color: isDir ? 'var(--warning)' : 'var(--text-muted)', flexShrink: 0 }}>
+                  {isDir ? <Folder size={13} /> : <File size={13} />}
+                </span>
+                <span
+                  className="truncate flex-1 text-xs"
+                  style={{ color: 'var(--text-primary)' }}
+                  title={entry.name}
+                >
+                  {entry.name}
+                </span>
+                {!isDir && (
+                  <span className="flex-shrink-0 text-xs" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+                    {formatSize(entry.size)}
+                  </span>
+                )}
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* Status bar */}
+      <div
+        className="flex items-center gap-2 px-2 py-1 text-xs flex-shrink-0"
+        style={{ background: 'var(--bg-elevated)', borderTop: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
+      >
+        <span>{entries.length} item{entries.length !== 1 ? 's' : ''}</span>
+        {selected && (
+          <>
+            <span>·</span>
+            <span className="truncate" style={{ color: 'var(--text-secondary)' }}>{selected.name}</span>
+          </>
+        )}
+      </div>
+    </div>
   )
 }

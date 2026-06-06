@@ -256,4 +256,32 @@ export function setupIpcHandlers(): void {
     })
     return result.canceled ? null : result.filePaths[0]
   })
+
+  // --- Local filesystem (for split-pane SFTP) ---
+  ipcMain.handle('local:homedir', () => os.homedir())
+  ipcMain.handle('local:list', (_e, dirPath: string) => {
+    const fs = require('fs') as typeof import('fs')
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+    return entries.map((e) => {
+      const fullPath = path.join(dirPath, e.name)
+      let size = 0
+      let modifyTime = 0
+      try {
+        const stat = fs.statSync(fullPath)
+        size = stat.size
+        modifyTime = Math.floor(stat.mtimeMs / 1000)
+      } catch {}
+      return { name: e.name, type: e.isDirectory() ? 'directory' : 'file', size, modifyTime }
+    })
+  })
+
+  // Direct transfers without dialogs (used by split-pane SFTP)
+  ipcMain.handle('sftp:uploadDirect', async (_e, sessionId: string, localPath: string, remotePath: string) => {
+    await uploadFile(sessionId, localPath, remotePath)
+    return true
+  })
+  ipcMain.handle('sftp:downloadDirect', async (_e, sessionId: string, remotePath: string, localPath: string) => {
+    await downloadFile(sessionId, remotePath, localPath)
+    return localPath
+  })
 }

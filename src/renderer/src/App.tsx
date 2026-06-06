@@ -109,6 +109,17 @@ export default function App() {
     }
   }
 
+  const handleNewTab = (tab: Tab) => {
+    const server = servers.find((s) => s.id === tab.serverId)
+    if (server) handleConnectServer(server)
+  }
+
+  const handleToggleSftp = (tabId: string) => {
+    const tab = tabs.find((t) => t.id === tabId)
+    if (!tab || tab.status !== 'connected') return
+    updateTab(tabId, { mode: tab.mode === 'sftp' ? 'terminal' : 'sftp' })
+  }
+
   const handleCloseTab = async (tab: Tab) => {
     if (tab.sessionId) {
       try {
@@ -147,7 +158,11 @@ export default function App() {
 
           {/* Terminal tabs — só visível na página terminal */}
           {showTerminal && tabs.length > 0 && (
-            <TabBar onCloseTab={handleCloseTab} />
+            <TabBar
+              onCloseTab={handleCloseTab}
+              onNewTab={handleNewTab}
+              onToggleSftp={handleToggleSftp}
+            />
           )}
 
           {/* Page content */}

@@ -71,7 +71,17 @@ const api = {
       ipcRenderer.invoke('sftp:upload', sessionId, remotePath),
     delete: (sessionId: string, remotePath: string, isDir: boolean) =>
       ipcRenderer.invoke('sftp:delete', sessionId, remotePath, isDir),
-    reveal: (localPath: string) => ipcRenderer.invoke('sftp:reveal', localPath)
+    reveal: (localPath: string) => ipcRenderer.invoke('sftp:reveal', localPath),
+    uploadDirect: (sessionId: string, localPath: string, remotePath: string) =>
+      ipcRenderer.invoke('sftp:uploadDirect', sessionId, localPath, remotePath),
+    downloadDirect: (sessionId: string, remotePath: string, localPath: string) =>
+      ipcRenderer.invoke('sftp:downloadDirect', sessionId, remotePath, localPath)
+  },
+
+  // Local filesystem
+  local: {
+    homedir: (): Promise<string> => ipcRenderer.invoke('local:homedir'),
+    list: (dirPath: string) => ipcRenderer.invoke('local:list', dirPath)
   },
 
   // Dialogs
