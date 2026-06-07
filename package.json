@@ -1,6 +1,6 @@
 {
   "name": "ssh-corporate-client",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "Corporate SSH client with dark/light themes, multi-tab terminal, SFTP and session logging",
   "author": "alcirhagge",
   "license": "MIT",
@@ -38,7 +38,8 @@
     "publish": {
       "provider": "github",
       "owner": "alcirhagge",
-      "repo": "corpssh"
+      "repo": "corpssh",
+      "releaseType": "release"
     },
     "win": {
       "target": [
