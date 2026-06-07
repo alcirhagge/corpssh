@@ -1,5 +1,6 @@
 import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
+import * as fs from 'fs'
 import { addLogEntry, getLogs, clearLogs } from './logger'
 import { sendRemoteLog, testConnection, setRemoteConfig, type RemoteLogConfig } from './remoteLogger'
 import { exportToXML, importFromXML } from './xmlManager'
@@ -101,7 +102,7 @@ export function setupIpcHandlers(): void {
     const servers = getServers()
     const groups = getGroups()
     const xml = exportToXML(servers, groups)
-    require('fs').writeFileSync(result.filePath, xml, 'utf-8')
+    fs.writeFileSync(result.filePath, xml, 'utf-8')
     return result.filePath
   })
 
@@ -113,7 +114,7 @@ export function setupIpcHandlers(): void {
       properties: ['openFile']
     })
     if (result.canceled || !result.filePaths.length) return null
-    const xml = require('fs').readFileSync(result.filePaths[0], 'utf-8')
+    const xml = fs.readFileSync(result.filePaths[0], 'utf-8')
     const data = importFromXML(xml)
     data.groups.forEach(g => { if (!g.id) g.id = generateId(); saveGroup(g) })
     data.servers.forEach(s => { if (!s.id) s.id = generateId(); saveServer(s) })

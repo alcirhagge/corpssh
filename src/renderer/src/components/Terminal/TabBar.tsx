@@ -101,27 +101,47 @@ function TabItem({
         />
       )}
 
-      {/* Mode icon — click to toggle SFTP/Terminal */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation()
-          if (tab.status === 'connected') onToggleSftp()
-        }}
-        title={tab.mode === 'sftp' ? 'Voltar ao Terminal' : 'Abrir SFTP'}
-        className="flex items-center justify-center flex-shrink-0 rounded"
+      {/* Mode toggle chips — Terminal | SFTP */}
+      <div
+        className="flex items-center flex-shrink-0 rounded overflow-hidden"
         style={{
-          color: tab.mode === 'sftp' ? 'var(--purple, #8b5cf6)' : 'var(--accent)',
-          background: 'transparent',
-          padding: 3,
-          cursor: tab.status === 'connected' ? 'pointer' : 'default'
+          border: '1px solid var(--border)',
+          opacity: tab.status === 'connected' ? 1 : 0.35,
+          pointerEvents: tab.status === 'connected' ? 'auto' : 'none'
         }}
-        onMouseEnter={(e) => {
-          if (tab.status === 'connected') e.currentTarget.style.background = 'var(--bg-active)'
-        }}
-        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        onClick={(e) => e.stopPropagation()}
       >
-        {tab.mode === 'sftp' ? <FolderOpen size={15} /> : <Terminal size={15} />}
-      </button>
+        <button
+          onClick={() => tab.mode === 'sftp' && onToggleSftp()}
+          title="Modo Terminal"
+          className="flex items-center gap-1 px-1.5"
+          style={{
+            height: 22,
+            fontSize: 10, fontWeight: 600,
+            background: tab.mode === 'terminal' ? 'var(--accent)' : 'transparent',
+            color: tab.mode === 'terminal' ? '#fff' : 'var(--text-muted)',
+            cursor: tab.mode === 'sftp' ? 'pointer' : 'default'
+          }}
+        >
+          <Terminal size={10} />
+          SSH
+        </button>
+        <button
+          onClick={() => tab.mode === 'terminal' && onToggleSftp()}
+          title="Modo SFTP"
+          className="flex items-center gap-1 px-1.5"
+          style={{
+            height: 22,
+            fontSize: 10, fontWeight: 600,
+            background: tab.mode === 'sftp' ? 'var(--purple, #8b5cf6)' : 'transparent',
+            color: tab.mode === 'sftp' ? '#fff' : 'var(--text-muted)',
+            cursor: tab.mode === 'terminal' ? 'pointer' : 'default'
+          }}
+        >
+          <FolderOpen size={10} />
+          SFTP
+        </button>
+      </div>
 
       {/* Status dot */}
       <div

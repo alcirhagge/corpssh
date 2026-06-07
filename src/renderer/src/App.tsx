@@ -49,49 +49,18 @@ export default function App() {
     return unsub
   }, [])
 
-  const handleConnectServer = async (server: Server) => {
-    const proto = server.protocol ?? 'ssh'
-
-    // RDP — abre cliente nativo, sem tab no app
-    if (proto === 'rdp') {
-      const result = await window.api.rdp.connect({
-        id: server.id, name: server.name,
-        host: server.host, port: server.port,
-        username: server.username, password: server.password,
-        domain: server.rdpDomain, fullscreen: server.rdpFullscreen
-      })
-      if (!result.ok) alert(`RDP: ${result.message}`)
-      return
-    }
-
-    // VNC — abre janela separada com noVNC
-    if (proto === 'vnc') {
-      try {
-        await window.api.vnc.connect({
-          id: server.id, name: server.name,
-          host: server.host, port: server.port,
-          username: server.username, vncPassword: server.vncPassword
-        })
-      } catch (e: any) {
-        alert(`VNC: ${e.message}`)
-      }
-      return
-    }
-
-    // SSH — flow existente
+  const openSSHTab = async (server: Server, mode: 'terminal' | 'sftp') => {
     const tabId = `tab-${Date.now()}`
-    const newTab: Tab = {
+    addTab({
       id: tabId,
       serverId: server.id,
       serverName: server.name,
       serverHost: `${server.host}:${server.port}`,
       status: 'connecting',
-      mode: 'terminal',
+      mode,
       connectedAt: Date.now()
-    }
-    addTab(newTab)
+    })
     setActivePage('terminal')
-
     try {
       const sessionId = await window.api.ssh.connect({
         id: server.id, name: server.name,
@@ -108,6 +77,38 @@ export default function App() {
       updateTab(tabId, { status: 'error', errorMessage: e.message || 'Falha na conexao' })
     }
   }
+
+  const handleConnectServer = async (server: Server) => {
+    const proto = server.protocol ?? 'ssh'
+
+    if (proto === 'rdp') {
+      const result = await window.api.rdp.connect({
+        id: server.id, name: server.name,
+        host: server.host, port: server.port,
+        username: server.username, password: server.password,
+        domain: server.rdpDomain, fullscreen: server.rdpFullscreen
+      })
+      if (!result.ok) alert(`RDP: ${result.message}`)
+      return
+    }
+
+    if (proto === 'vnc') {
+      try {
+        await window.api.vnc.connect({
+          id: server.id, name: server.name,
+          host: server.host, port: server.port,
+          username: server.username, vncPassword: server.vncPassword
+        })
+      } catch (e: any) {
+        alert(`VNC: ${e.message}`)
+      }
+      return
+    }
+
+    await openSSHTab(server, 'terminal')
+  }
+
+  const handleConnectSftp = (server: Server) => openSSHTab(server, 'sftp')
 
   const handleNewTab = (tab: Tab) => {
     const server = servers.find((s) => s.id === tab.serverId)
@@ -170,7 +171,7 @@ export default function App() {
             {/* Hosts dashboard */}
             {showHosts && (
               <>
-                <HostDashboard onConnect={handleConnectServer} />
+                <HostDashboard onConnect={handleConnectServer} onConnectSftp={handleConnectSftp} />
                 {showRightPanel && <HostForm onConnect={handleConnectServer} />}
               </>
             )}

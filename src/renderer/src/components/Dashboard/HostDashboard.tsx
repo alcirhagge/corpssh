@@ -34,6 +34,7 @@ import { HOST_ICON_COLORS } from '../../types'
 
 interface HostDashboardProps {
   onConnect: (server: ServerType) => void
+  onConnectSftp: (server: ServerType) => void
 }
 
 function getIconColor(server: ServerType): string {
@@ -50,7 +51,7 @@ function getInitials(name: string): string {
     .join('')
 }
 
-export default function HostDashboard({ onConnect }: HostDashboardProps) {
+export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboardProps) {
   const { servers, groups, setGroups, setRightPanel, upsertGroup, removeServer, removeGroup, activePage } = useAppStore()
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -258,6 +259,7 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
                       servers={items}
                       viewMode={viewMode}
                       onConnect={onConnect}
+                      onConnectSftp={onConnectSftp}
                       onEdit={(s) => setRightPanel({ mode: 'edit', server: s })}
                       onDelete={handleDeleteServer}
                       menuOpenId={serverMenuId}
@@ -281,6 +283,7 @@ export default function HostDashboard({ onConnect }: HostDashboardProps) {
                     servers={items}
                     viewMode={viewMode}
                     onConnect={onConnect}
+                    onConnectSftp={onConnectSftp}
                     onEdit={(s) => setRightPanel({ mode: 'edit', server: s })}
                     onDelete={handleDeleteServer}
                     menuOpenId={serverMenuId}
@@ -369,10 +372,11 @@ function SectionLabel({ label, count }: { label: string; count: number }) {
   )
 }
 
-function HostGrid({ servers, viewMode, onConnect, onEdit, onDelete, menuOpenId, onMenuOpen, onMenuClose }: {
+function HostGrid({ servers, viewMode, onConnect, onConnectSftp, onEdit, onDelete, menuOpenId, onMenuOpen, onMenuClose }: {
   servers: ServerType[]
   viewMode: 'grid' | 'list'
   onConnect: (s: ServerType) => void
+  onConnectSftp: (s: ServerType) => void
   onEdit: (s: ServerType) => void
   onDelete: (id: string) => void
   menuOpenId: string | null
@@ -387,6 +391,7 @@ function HostGrid({ servers, viewMode, onConnect, onEdit, onDelete, menuOpenId, 
             key={s.id}
             server={s}
             onConnect={() => onConnect(s)}
+            onConnectSftp={() => onConnectSftp(s)}
             onEdit={() => onEdit(s)}
             onDelete={() => onDelete(s.id)}
             menuOpen={menuOpenId === s.id}
@@ -404,6 +409,7 @@ function HostGrid({ servers, viewMode, onConnect, onEdit, onDelete, menuOpenId, 
           key={s.id}
           server={s}
           onConnect={() => onConnect(s)}
+          onConnectSftp={() => onConnectSftp(s)}
           onEdit={() => onEdit(s)}
           onDelete={() => onDelete(s.id)}
           menuOpen={menuOpenId === s.id}
@@ -415,9 +421,10 @@ function HostGrid({ servers, viewMode, onConnect, onEdit, onDelete, menuOpenId, 
   )
 }
 
-function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, onMenuClose }: {
+function HostCard({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen, onMenuOpen, onMenuClose }: {
   server: ServerType
   onConnect: () => void
+  onConnectSftp: () => void
   onEdit: () => void
   onDelete: () => void
   menuOpen: boolean
@@ -470,14 +477,28 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
           </div>
           <div className="flex items-center gap-1">
             {hovered && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onConnect() }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium"
-                style={{ background: 'var(--accent)', color: '#fff', fontSize: 11 }}
-              >
-                {server.protocol === 'ssh' ? <Terminal size={10} /> : <Monitor size={10} />}
-                {(server.protocol ?? 'ssh').toUpperCase()}
-              </button>
+              <>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onConnect() }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium"
+                  style={{ background: 'var(--accent)', color: '#fff', fontSize: 11 }}
+                  title="Conectar terminal"
+                >
+                  {server.protocol === 'ssh' ? <Terminal size={10} /> : <Monitor size={10} />}
+                  {(server.protocol ?? 'ssh').toUpperCase()}
+                </button>
+                {(server.protocol ?? 'ssh') === 'ssh' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onConnectSftp() }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium"
+                    style={{ background: 'var(--purple, #8b5cf6)', color: '#fff', fontSize: 11 }}
+                    title="Abrir SFTP"
+                  >
+                    <FolderOpen size={10} />
+                    SFTP
+                  </button>
+                )}
+              </>
             )}
             <button
               onClick={onMenuOpen}
@@ -510,6 +531,7 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
       {menuOpen && (
         <DropMenu onClose={onMenuClose} items={[
           { label: 'Conectar', onClick: onConnect },
+          ...((server.protocol ?? 'ssh') === 'ssh' ? [{ label: 'Abrir SFTP', onClick: onConnectSftp }] : []),
           { label: 'Editar', onClick: onEdit },
           { label: 'Excluir', onClick: onDelete, danger: true }
         ]} />
@@ -518,8 +540,8 @@ function HostCard({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, o
   )
 }
 
-function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, onMenuClose }: {
-  server: ServerType; onConnect: () => void; onEdit: () => void; onDelete: () => void
+function HostRow({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen, onMenuOpen, onMenuClose }: {
+  server: ServerType; onConnect: () => void; onConnectSftp: () => void; onEdit: () => void; onDelete: () => void
   menuOpen: boolean; onMenuOpen: (e: React.MouseEvent) => void; onMenuClose: () => void
 }) {
   const [hovered, setHovered] = useState(false)
@@ -564,14 +586,28 @@ function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, on
         </p>
       </div>
       {hovered && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onConnect() }}
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs"
-          style={{ background: 'var(--accent)', color: '#fff' }}
-        >
-          {server.protocol === 'ssh' ? <Terminal size={11} /> : <Monitor size={11} />}
-          {(server.protocol ?? 'ssh').toUpperCase()}
-        </button>
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); onConnect() }}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs"
+            style={{ background: 'var(--accent)', color: '#fff' }}
+            title="Conectar terminal"
+          >
+            {server.protocol === 'ssh' ? <Terminal size={11} /> : <Monitor size={11} />}
+            {(server.protocol ?? 'ssh').toUpperCase()}
+          </button>
+          {(server.protocol ?? 'ssh') === 'ssh' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onConnectSftp() }}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs"
+              style={{ background: 'var(--purple, #8b5cf6)', color: '#fff' }}
+              title="Abrir SFTP"
+            >
+              <FolderOpen size={11} />
+              SFTP
+            </button>
+          )}
+        </>
       )}
       <button
         onClick={onMenuOpen}
@@ -583,6 +619,7 @@ function HostRow({ server, onConnect, onEdit, onDelete, menuOpen, onMenuOpen, on
       {menuOpen && (
         <DropMenu onClose={onMenuClose} items={[
           { label: 'Conectar', onClick: onConnect },
+          ...((server.protocol ?? 'ssh') === 'ssh' ? [{ label: 'Abrir SFTP', onClick: onConnectSftp }] : []),
           { label: 'Editar', onClick: onEdit },
           { label: 'Excluir', onClick: onDelete, danger: true }
         ]} />
