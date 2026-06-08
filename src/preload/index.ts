@@ -124,6 +124,7 @@ const api = {
   // XML
   xml: {
     export: () => ipcRenderer.invoke('xml:export'),
+    exportWithCredentials: () => ipcRenderer.invoke('xml:exportWithCredentials'),
     import: () => ipcRenderer.invoke('xml:import')
   },
 

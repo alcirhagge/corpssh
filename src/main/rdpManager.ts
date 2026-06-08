@@ -42,9 +42,10 @@ function buildRDPFile(cfg: RDPConfig): string {
     `redirectclipboard:i:1`,
     `redirectposdevices:i:0`,
     `autoreconnection enabled:i:1`,
-    `authentication level:i:2`,
+    `authentication level:i:0`,
     `prompt for credentials:i:0`,
     `negotiate security layer:i:1`,
+    `enablecredsspsupport:i:1`,
     `remoteapplicationmode:i:0`,
     `alternate shell:s:`,
     `shell working directory:s:`,
@@ -78,6 +79,23 @@ function launchWindows(cfg: RDPConfig): Promise<{ ok: boolean; message: string }
     const rdpContent = buildRDPFile(cfg)
     const tmpFile = path.join(os.tmpdir(), `corpssh-rdp-${Date.now()}.rdp`)
     fs.writeFileSync(tmpFile, rdpContent, 'utf-8')
+
+    // Pre-register credentials in Windows Credential Manager so mstsc
+    // doesn't show a password prompt. Cleaned up 60s after launch.
+    const credTarget = `TERMSRV/${cfg.host}`
+    const userFull = cfg.domain ? `${cfg.domain}\\${cfg.username}` : cfg.username
+    if (cfg.password) {
+      const credProc = spawn('cmdkey', [
+        `/generic:${credTarget}`,
+        `/user:${userFull}`,
+        `/pass:${cfg.password}`
+      ], { stdio: 'ignore' })
+      credProc.unref()
+      setTimeout(() => {
+        const del = spawn('cmdkey', [`/delete:${credTarget}`], { stdio: 'ignore' })
+        del.unref()
+      }, 60000)
+    }
 
     const proc = spawn('mstsc', [tmpFile], { detached: true, stdio: 'ignore' })
     proc.unref()

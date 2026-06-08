@@ -38,17 +38,14 @@ export function createSessionLog(meta: SessionMeta): void {
 }
 
 function stripAnsi(str: string): string {
-  const cleaned = str
+  return str
     .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
     .replace(/\x1b[^[\]]/g, '')
     .replace(/\x9b[0-9;?]*[A-Za-z]/g, '')
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
-  // For each line, handle \r: last segment after \r wins (terminal overwrite semantics)
-  return cleaned.split('\n').map(line => {
-    const parts = line.split('\r')
-    return parts[parts.length - 1]
-  }).join('\n')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
 }
 
 export function appendSessionData(sessionId: string, data: string): void {
@@ -101,4 +98,34 @@ export function deleteSession(sessionId: string): void {
   const meta = path.join(SESSIONS_DIR, `${sessionId}.json`)
   if (fs.existsSync(log)) fs.unlinkSync(log)
   if (fs.existsSync(meta)) fs.unlinkSync(meta)
+}
+
+// Called on app startup: marks any session without endedAt as closed.
+// Sessions left open happen when the app crashes or is force-closed.
+export function cleanupOrphanedSessions(): void {
+  try {
+    ensureDir()
+    const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json'))
+    for (const file of files) {
+      try {
+        const metaPath = path.join(SESSIONS_DIR, file)
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as SessionMeta
+        if (meta.endedAt) continue
+
+        // Use .log file mtime as approximate end time; fallback to now
+        const logPath = path.join(SESSIONS_DIR, `${meta.sessionId}.log`)
+        const endedAt = fs.existsSync(logPath)
+          ? fs.statSync(logPath).mtimeMs
+          : Date.now()
+
+        meta.endedAt = endedAt
+        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8')
+
+        if (fs.existsSync(logPath)) {
+          const footer = `\n${'='.repeat(40)}\nSession ended: ${new Date(endedAt).toISOString()} (recovered on restart)\n`
+          fs.appendFileSync(logPath, footer, 'utf-8')
+        }
+      } catch { /* skip corrupt entries */ }
+    }
+  } catch { /* ignore if sessions dir doesn't exist yet */ }
 }

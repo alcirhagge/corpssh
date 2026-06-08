@@ -331,19 +331,17 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
         {/* VNC section */}
         {form.protocol === 'vnc' && (
           <FormSection label="VNC">
-            <div className="relative">
-              <input
-                type={showPw ? 'text' : 'password'}
-                value={form.vncPassword ?? ''}
-                onChange={(e) => set('vncPassword', e.target.value)}
-                placeholder="Senha VNC (opcional)"
-                style={{ paddingRight: 32 }}
-              />
-              <button onClick={() => setShowPw((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2"
-                style={{ color: 'var(--text-muted)', background: 'none' }}>
-                {showPw ? <EyeOff size={12} /> : <Eye size={12} />}
-              </button>
+            <div
+              className="flex flex-col items-center gap-2 py-3 px-2 rounded-lg text-center"
+              style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', opacity: 0.9 }}
+            >
+              <span style={{ fontSize: 20 }}>🚧</span>
+              <p className="text-xs font-semibold" style={{ color: 'var(--warning)' }}>
+                Função sendo implementada
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)', fontSize: 10, lineHeight: 1.4 }}>
+                O suporte a VNC ainda está em desenvolvimento e não está disponível nesta versão.
+              </p>
             </div>
           </FormSection>
         )}
@@ -359,11 +357,16 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
       <div className="p-3" style={{ borderTop: '1px solid var(--border)' }}>
         <button
           onClick={handleConnect}
-          disabled={saving}
+          disabled={saving || form.protocol === 'vnc'}
           className="w-full py-2 rounded-lg text-xs font-semibold"
-          style={{ background: 'var(--accent)', color: '#fff', opacity: saving ? 0.7 : 1 }}
+          style={{
+            background: form.protocol === 'vnc' ? 'var(--bg-active)' : 'var(--accent)',
+            color: form.protocol === 'vnc' ? 'var(--text-muted)' : '#fff',
+            opacity: saving ? 0.7 : 1,
+            cursor: form.protocol === 'vnc' ? 'not-allowed' : 'pointer'
+          }}
         >
-          Connect
+          {form.protocol === 'vnc' ? 'Indisponível' : 'Connect'}
         </button>
       </div>
     </div>

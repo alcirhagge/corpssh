@@ -145,13 +145,19 @@ export function getThemeBase(themeId: string): 'dark' | 'light' {
 
 export function applyTheme(themeId: string): void {
   const theme = THEMES.find((t) => t.id === themeId) ?? THEMES[0]
-  // Set data-theme attribute (for any CSS that uses it)
   document.documentElement.setAttribute('data-theme', themeId)
-  // Set dark/light class
   document.documentElement.classList.remove('dark', 'light')
   document.documentElement.classList.add(theme.base)
-  // Set all CSS variables directly via inline style — highest priority, no cascade issues
-  for (const [prop, value] of Object.entries(theme.vars)) {
-    document.documentElement.style.setProperty(prop, value)
+
+  // Inject a <style> tag appended to <head> so it comes after globals.css in
+  // document order. Rules with equal specificity (:root) that appear later win,
+  // so this reliably overrides any :root / .dark definition in the stylesheet.
+  let el = document.getElementById('cs-theme') as HTMLStyleElement | null
+  if (!el) {
+    el = document.createElement('style')
+    el.id = 'cs-theme'
+    document.head.appendChild(el)
   }
+  const vars = Object.entries(theme.vars).map(([k, v]) => `  ${k}: ${v};`).join('\n')
+  el.textContent = `:root {\n${vars}\n}`
 }

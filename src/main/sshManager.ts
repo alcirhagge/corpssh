@@ -41,7 +41,8 @@ function getWindow(): BrowserWindow | null {
 
 export function createSSHConnection(
   sessionId: string,
-  config: SSHConnectionConfig
+  config: SSHConnectionConfig,
+  onNaturalClose?: () => void
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const client = new Client()
@@ -51,7 +52,50 @@ export function createSSHConnection(
       port: config.port,
       username: config.username,
       readyTimeout: 15000,
-      keepaliveInterval: 30000
+      keepaliveInterval: 30000,
+      tryKeyboard: true,
+      algorithms: {
+        kex: [
+          'curve25519-sha256',
+          'curve25519-sha256@libssh.org',
+          'ecdh-sha2-nistp256',
+          'ecdh-sha2-nistp384',
+          'ecdh-sha2-nistp521',
+          'diffie-hellman-group-exchange-sha256',
+          'diffie-hellman-group14-sha256',
+          'diffie-hellman-group14-sha1',
+          'diffie-hellman-group-exchange-sha1',
+          'diffie-hellman-group1-sha1'
+        ],
+        serverHostKey: [
+          'ecdsa-sha2-nistp256',
+          'ecdsa-sha2-nistp384',
+          'ecdsa-sha2-nistp521',
+          'rsa-sha2-512',
+          'rsa-sha2-256',
+          'ssh-rsa',
+          'ssh-dss'
+        ],
+        cipher: [
+          'aes128-gcm',
+          'aes128-gcm@openssh.com',
+          'aes256-gcm',
+          'aes256-gcm@openssh.com',
+          'aes128-ctr',
+          'aes192-ctr',
+          'aes256-ctr',
+          'aes256-cbc',
+          'aes192-cbc',
+          'aes128-cbc',
+          '3des-cbc'
+        ],
+        hmac: [
+          'hmac-sha2-256',
+          'hmac-sha2-512',
+          'hmac-sha1',
+          'hmac-md5'
+        ]
+      }
     }
 
     if (config.authMethod === 'password' && config.password) {
@@ -73,6 +117,10 @@ export function createSSHConnection(
       connectConfig.agent = process.env.SSH_AUTH_SOCK || undefined
     }
 
+    client.on('keyboard-interactive', (_name, _instructions, _lang, prompts, finish) => {
+      finish(prompts.map(() => config.password ?? ''))
+    })
+
     client.on('ready', () => {
       activeConnections.set(sessionId, { client, sessionId, config })
       resolve()
@@ -87,6 +135,7 @@ export function createSSHConnection(
       activeConnections.delete(sessionId)
       const win = getWindow()
       win?.webContents.send(`ssh:closed:${sessionId}`)
+      onNaturalClose?.()
     })
 
     client.connect(connectConfig)

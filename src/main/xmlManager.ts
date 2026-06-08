@@ -28,6 +28,37 @@ export function exportToXML(servers: ServerRecord[], groups: GroupRecord[]): str
   ].join('\n')
 }
 
+export function exportToXMLWithCredentials(servers: ServerRecord[], groups: GroupRecord[]): string {
+  const groupsXml = groups.map((g) =>
+    `    <Group id="${esc(g.id)}" name="${esc(g.name)}" color="${esc(g.color ?? '')}" />`
+  ).join('\n')
+
+  const serversXml = servers.map((s) =>
+    `    <Server\n` +
+    `      id="${esc(s.id)}" name="${esc(s.name)}" host="${esc(s.host)}" port="${s.port}"\n` +
+    `      username="${esc(s.username)}" authMethod="${esc(s.authMethod)}"\n` +
+    `      password="${esc(s.password ?? '')}"\n` +
+    `      privateKeyPath="${esc(s.privateKeyPath ?? '')}"\n` +
+    `      passphrase="${esc(s.passphrase ?? '')}"\n` +
+    `      groupId="${esc(s.groupId ?? '')}" color="${esc(s.color ?? '')}"\n` +
+    `      tags="${esc((s.tags ?? []).join(','))}" notes="${esc(s.notes ?? '')}" />`
+  ).join('\n')
+
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<!-- CorpSSH Export WITH CREDENTIALS - ${new Date().toISOString()} -->`,
+    `<!-- AVISO: Este arquivo contém senhas em texto puro. Guarde com segurança. -->`,
+    '<CorpSSH version="1.0" includesCredentials="true">',
+    '  <Groups>',
+    groupsXml || '    <!-- no groups -->',
+    '  </Groups>',
+    '  <Servers>',
+    serversXml || '    <!-- no servers -->',
+    '  </Servers>',
+    '</CorpSSH>'
+  ].join('\n')
+}
+
 export interface ImportResult {
   servers: ServerRecord[]
   groups: GroupRecord[]
@@ -58,6 +89,9 @@ export function importFromXML(xmlContent: string): ImportResult {
         port: parseInt(attrs.port ?? '22') || 22,
         username: attrs.username || '',
         authMethod: (attrs.authMethod as any) || 'password',
+        password: attrs.password || undefined,
+        privateKeyPath: attrs.privateKeyPath || undefined,
+        passphrase: attrs.passphrase || undefined,
         groupId: attrs.groupId || undefined,
         color: attrs.color || undefined,
         tags: attrs.tags ? attrs.tags.split(',').filter(Boolean) : [],

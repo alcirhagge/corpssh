@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { Plus, Search, ChevronDown, Grid, List, Terminal, Folder, FolderOpen, MoreHorizontal, Trash2, FolderPlus, Monitor } from 'lucide-react'
 
 function WindowsIcon({ size = 20 }: { size?: number }) {
@@ -37,6 +37,8 @@ interface HostDashboardProps {
   onConnectSftp: (server: ServerType) => void
 }
 
+let savedScrollTop = 0
+
 function getIconColor(server: ServerType): string {
   if (server.color) return server.color
   const idx = server.name.charCodeAt(0) % HOST_ICON_COLORS.length
@@ -53,8 +55,15 @@ function getInitials(name: string): string {
 
 export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboardProps) {
   const { servers, groups, setGroups, setRightPanel, upsertGroup, removeServer, removeGroup, activePage } = useAppStore()
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [search, setSearch] = useState('')
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = savedScrollTop
+  }, [])
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(
+    () => (localStorage.getItem('hostViewMode') as 'grid' | 'list') ?? 'grid'
+  )
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null)
   const [serverMenuId, setServerMenuId] = useState<string | null>(null)
@@ -200,7 +209,7 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
         {(['grid', 'list'] as const).map((mode) => (
           <button
             key={mode}
-            onClick={() => setViewMode(mode)}
+            onClick={() => { setViewMode(mode); localStorage.setItem('hostViewMode', mode) }}
             className="flex items-center justify-center w-9 h-9 rounded"
             style={{
               background: viewMode === mode ? 'var(--bg-active)' : 'transparent',
@@ -213,7 +222,11 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto p-4"
+        onScroll={(e) => { savedScrollTop = (e.currentTarget as HTMLDivElement).scrollTop }}
+      >
         {servers.length === 0 && !search ? (
           <EmptyState onAdd={() => setRightPanel({ mode: 'new' })} />
         ) : filtered.length === 0 ? (

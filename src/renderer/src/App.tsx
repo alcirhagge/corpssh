@@ -40,7 +40,7 @@ export default function App() {
       const base = getThemeBase(themeId)
       setTheme(base)
       applyTheme(themeId)
-      document.documentElement.style.setProperty('--ui-font-size', `${settingsData.uiFontSize ?? 14}px`)
+      document.documentElement.style.setProperty('--ui-font-size', `${settingsData.uiFontSize ?? 15}px`)
     }
     load()
 
@@ -93,15 +93,7 @@ export default function App() {
     }
 
     if (proto === 'vnc') {
-      try {
-        await window.api.vnc.connect({
-          id: server.id, name: server.name,
-          host: server.host, port: server.port,
-          username: server.username, vncPassword: server.vncPassword
-        })
-      } catch (e: any) {
-        alert(`VNC: ${e.message}`)
-      }
+      alert('VNC: Função sendo implementada.\nEsta funcionalidade ainda não está disponível nesta versão.')
       return
     }
 
@@ -163,6 +155,7 @@ export default function App() {
               onCloseTab={handleCloseTab}
               onNewTab={handleNewTab}
               onToggleSftp={handleToggleSftp}
+              onConnectServer={handleConnectServer}
             />
           )}
 
@@ -205,10 +198,27 @@ export default function App() {
                         onClose={() => handleCloseTab(tab)}
                       />
                     )}
-                    {tab.status === 'connected' && tab.sessionId && (
-                      tab.mode === 'sftp'
-                        ? <SFTPBrowser tab={tab} />
-                        : <TerminalPane tab={tab} isActive={tab.id === activeTabId} isPageVisible={showTerminal} />
+                    {(tab.status === 'connected' || tab.status === 'disconnected') && tab.sessionId && (
+                      <>
+                        {/* TerminalPane sempre montado — só escondido em modo SFTP para preservar histórico */}
+                        <div style={{ position: 'absolute', inset: 0, display: tab.mode === 'sftp' && tab.status === 'connected' ? 'none' : 'block' }}>
+                          <TerminalPane
+                            tab={tab}
+                            isActive={tab.id === activeTabId && !(tab.mode === 'sftp' && tab.status === 'connected')}
+                            isPageVisible={showTerminal}
+                            onReconnect={() => {
+                              const server = servers.find((s) => s.id === tab.serverId)
+                              if (server) { removeTab(tab.id); handleConnectServer(server) }
+                            }}
+                            onClose={() => handleCloseTab(tab)}
+                          />
+                        </div>
+                        {tab.mode === 'sftp' && tab.status === 'connected' && (
+                          <div style={{ position: 'absolute', inset: 0 }}>
+                            <SFTPBrowser tab={tab} />
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 ))}
@@ -255,16 +265,45 @@ function LoadingScreen({ name, host }: { name: string; host: string }) {
   )
 }
 
+function friendlyError(raw: string): { title: string; detail: string } {
+  const r = raw.toLowerCase()
+  if (r.includes('all configured authentication methods failed') || r.includes('auth fail'))
+    return { title: 'Credenciais inválidas', detail: 'Verifique o usuário e a senha e tente novamente.' }
+  if (r.includes('no matching key exchange'))
+    return { title: 'Algoritmo de segurança incompatível', detail: 'O servidor usa criptografia antiga. Tente novamente — o CorpSSH já inclui suporte a algoritmos legados.' }
+  if (r.includes('handshake failed'))
+    return { title: 'Falha no handshake SSH', detail: 'O servidor recusou a negociação de segurança. Verifique as configurações do host.' }
+  if (r.includes('econnrefused') || r.includes('connection refused'))
+    return { title: 'Conexão recusada', detail: 'O servidor não está aceitando conexões. Verifique o host, porta e se o SSH está ativo.' }
+  if (r.includes('ehostunreach') || r.includes('host unreachable'))
+    return { title: 'Host inacessível', detail: 'Não foi possível alcançar o servidor. Verifique o IP e a conectividade de rede.' }
+  if (r.includes('etimedout') || r.includes('timed out') || r.includes('timeout'))
+    return { title: 'Tempo esgotado', detail: 'O servidor demorou demais para responder. Verifique se o host está acessível.' }
+  if (r.includes('enotfound'))
+    return { title: 'Host não encontrado', detail: 'O endereço do servidor não foi resolvido. Verifique o nome ou IP.' }
+  if (r.includes('cannot read private key') || r.includes('private key'))
+    return { title: 'Erro na chave privada', detail: 'Não foi possível ler a chave. Verifique o arquivo e a passphrase.' }
+  if (r.includes('socket hang up') || r.includes('connection reset'))
+    return { title: 'Conexão interrompida', detail: 'O servidor encerrou a conexão inesperadamente.' }
+  if (r.includes('keepalive'))
+    return { title: 'Sessão expirada', detail: 'A conexão foi encerrada por inatividade.' }
+  // fallback — strip the electron IPC prefix for cleaner display
+  const clean = raw.replace(/^Error invoking remote method '[^']+': /, '').replace(/^Error: /, '')
+  return { title: 'Falha ao conectar', detail: clean }
+}
+
 function ErrorScreen({ name, error, onRetry, onClose }: {
   name: string; error: string; onRetry: () => void; onClose: () => void
 }) {
+  const { title, detail } = friendlyError(error)
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4" style={{ background: 'var(--bg-app)' }}>
       <div className="w-12 h-12 rounded-full flex items-center justify-center text-2xl"
         style={{ background: 'var(--error-subtle)' }}>✕</div>
-      <div className="text-center">
+      <div className="text-center" style={{ maxWidth: 320 }}>
         <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Falha ao conectar em {name}</p>
-        <p className="text-xs mt-1 max-w-xs" style={{ color: 'var(--error)' }}>{error}</p>
+        <p className="font-semibold mt-2" style={{ color: 'var(--error)', fontSize: 14 }}>{title}</p>
+        <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{detail}</p>
       </div>
       <div className="flex gap-2">
         <button onClick={onRetry} className="px-4 py-1.5 rounded-lg text-xs font-medium"

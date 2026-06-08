@@ -12,16 +12,19 @@ interface TerminalPaneProps {
   tab: Tab
   isActive: boolean
   isPageVisible: boolean
+  onReconnect: () => void
+  onClose: () => void
 }
 
-export default function TerminalPane({ tab, isActive, isPageVisible }: TerminalPaneProps) {
+export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const searchAddonRef = useRef<SearchAddon | null>(null)
-  const { settings } = useAppStore()
+  const { settings, updateTab } = useAppStore()
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [isDisconnected, setIsDisconnected] = useState(false)
 
   const getTheme = useCallback(() => {
     const s = getComputedStyle(document.documentElement)
@@ -137,6 +140,8 @@ export default function TerminalPane({ tab, isActive, isPageVisible }: TerminalP
 
     const unsubClosed = window.api.ssh.onClosed(tab.sessionId!, () => {
       terminal.write('\r\n\x1b[33m[Sessão encerrada]\x1b[0m\r\n')
+      setIsDisconnected(true)
+      updateTab(tab.id, { status: 'disconnected' })
     })
 
     let shellOpened = false
@@ -190,6 +195,40 @@ export default function TerminalPane({ tab, isActive, isPageVisible }: TerminalP
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--terminal-bg)' }}>
+      {isDisconnected && (
+        <div
+          className="absolute inset-0 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.65)', zIndex: 20 }}
+        >
+          <div
+            className="flex flex-col items-center gap-4 p-6 rounded-xl"
+            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', minWidth: 280 }}
+          >
+            <div style={{ color: 'var(--warning, #f7b731)', fontSize: 14, fontWeight: 600 }}>
+              Sessão encerrada
+            </div>
+            <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+              {tab.serverName}<br />{tab.serverHost}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={onReconnect}
+                className="px-5 py-2 rounded-lg text-xs font-semibold"
+                style={{ background: 'var(--accent)', color: '#fff' }}
+              >
+                Reconectar
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-xs"
+                style={{ background: 'var(--bg-active)', color: 'var(--text-primary)' }}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showSearch && (
         <div
           className="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-lg px-2 py-1.5 shadow-xl"

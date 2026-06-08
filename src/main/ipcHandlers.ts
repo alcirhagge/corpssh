@@ -3,10 +3,11 @@ import { randomUUID } from 'crypto'
 import * as fs from 'fs'
 import { addLogEntry, getLogs, clearLogs } from './logger'
 import { sendRemoteLog, testConnection, setRemoteConfig, type RemoteLogConfig } from './remoteLogger'
-import { exportToXML, importFromXML } from './xmlManager'
+import { exportToXML, exportToXMLWithCredentials, importFromXML } from './xmlManager'
 import {
   createSessionLog, appendSessionData, appendSessionCommand,
-  closeSessionLog, listSessions, readSessionLog, deleteSession
+  closeSessionLog, listSessions, readSessionLog, deleteSession,
+  cleanupOrphanedSessions
 } from './sessionLogger'
 import { launchRDP } from './rdpManager'
 import { createVNCProxy, openVNCWindow, closeVNCSession } from './vncManager'
@@ -45,7 +46,13 @@ function generateId(): string {
   return randomUUID()
 }
 
+// Track session meta for natural-disconnect logging
+const sessionMetaMap = new Map<string, { serverId: string; serverName: string; host: string; username: string; connectedAt: number }>()
+
 export function setupIpcHandlers(): void {
+  // Close any sessions left open from a previous crash/force-quit
+  cleanupOrphanedSessions()
+
   // --- Server CRUD ---
   ipcMain.handle('servers:list', () => getServers())
   ipcMain.handle('servers:save', (_e, server: ServerRecord) => {
@@ -106,6 +113,21 @@ export function setupIpcHandlers(): void {
     return result.filePath
   })
 
+  ipcMain.handle('xml:exportWithCredentials', async () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Exportar servidores com credenciais',
+      defaultPath: `corpssh-export-credentials-${Date.now()}.xml`,
+      filters: [{ name: 'XML', extensions: ['xml'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    const servers = getServers()
+    const groups = getGroups()
+    const xml = exportToXMLWithCredentials(servers, groups)
+    require('fs').writeFileSync(result.filePath, xml, 'utf-8')
+    return result.filePath
+  })
+
   ipcMain.handle('xml:import', async () => {
     const win = BrowserWindow.getAllWindows()[0]
     const result = await dialog.showOpenDialog(win, {
@@ -157,22 +179,42 @@ export function setupIpcHandlers(): void {
   // --- SSH Connection ---
   ipcMain.handle('ssh:connect', async (_e, config) => {
     const sessionId = generateId()
-    await createSSHConnection(sessionId, config)
-    updateLastConnected(config.id)
-    const entry = addLogEntry({
-      type: 'connect', serverId: config.id,
-      serverName: config.name ?? config.host,
-      host: `${config.host}:${config.port}`,
-      username: config.username
-    })
-    createSessionLog({
-      sessionId, serverId: config.id,
-      serverName: config.name ?? config.host,
-      host: `${config.host}:${config.port}`,
-      username: config.username,
-      startedAt: Date.now()
-    })
+    const connectedAt = Date.now()
+    const serverName = config.name ?? config.host
+    const hostLabel = `${config.host}:${config.port}`
     const win = BrowserWindow.getAllWindows()[0]
+
+    const naturalCloseHandler = () => {
+      const meta = sessionMetaMap.get(sessionId)
+      if (!meta) return  // already logged via manual disconnect
+      sessionMetaMap.delete(sessionId)
+      const now = Date.now()
+      closeSessionLog(sessionId, now)
+      const entry = addLogEntry({ type: 'disconnect', ...meta, duration: now - meta.connectedAt })
+      BrowserWindow.getAllWindows()[0]?.webContents.send('log:new', entry)
+      sendRemoteLog(entry)
+    }
+
+    try {
+      await createSSHConnection(sessionId, config, naturalCloseHandler)
+    } catch (e: any) {
+      const msg = e.message ?? 'Connection failed'
+      const isAuthFail = /all configured authentication|auth fail/i.test(msg)
+      const errEntry = addLogEntry({
+        type: isAuthFail ? 'auth_fail' : 'error',
+        serverId: config.id, serverName, host: hostLabel,
+        username: config.username, message: msg
+      })
+      win?.webContents.send('log:new', errEntry)
+      sendRemoteLog(errEntry)
+      throw e
+    }
+
+    updateLastConnected(config.id)
+    sessionMetaMap.set(sessionId, { serverId: config.id, serverName, host: hostLabel, username: config.username, connectedAt })
+
+    const entry = addLogEntry({ type: 'connect', serverId: config.id, serverName, host: hostLabel, username: config.username })
+    createSessionLog({ sessionId, serverId: config.id, serverName, host: hostLabel, username: config.username, startedAt: connectedAt })
     win?.webContents.send('log:new', entry)
     sendRemoteLog(entry)
     return sessionId
@@ -193,6 +235,7 @@ export function setupIpcHandlers(): void {
 
   ipcMain.handle('ssh:disconnect', (_e, sessionId: string, meta?: { serverId: string; serverName: string; host: string; username: string; connectedAt?: number }) => {
     disconnectSSH(sessionId)
+    sessionMetaMap.delete(sessionId)  // prevent double-log from naturalCloseHandler
     const now = Date.now()
     closeSessionLog(sessionId, now)
     if (meta) {
