@@ -74,7 +74,7 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
       setRemoteEntries(sortEntries(list as PaneEntry[]))
       setRemotePath(path)
     } catch (e: any) {
-      setError(`Servidor: ${e.message}`)
+      setError(`Server: ${e.message}`)
     } finally {
       setRemoteLoading(false)
     }
@@ -102,13 +102,13 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
   const handleUpload = async () => {
     if (!selectedLocal || selectedLocal.type !== 'file' || !tab.sessionId) return
     setTransferring(true)
-    setTransferMsg(`Enviando ${selectedLocal.name}…`)
+    setTransferMsg(`Uploading ${selectedLocal.name}…`)
     setError(null)
     try {
       const src = joinPath(localPath, selectedLocal.name)
       const dst = joinPath(remotePath, selectedLocal.name)
       await window.api.sftp.uploadDirect(tab.sessionId, src, dst)
-      setTransferMsg(`${selectedLocal.name} enviado`)
+      setTransferMsg(`${selectedLocal.name} uploaded`)
       setTimeout(() => setTransferMsg(''), 2500)
       loadRemote(remotePath)
     } catch (e: any) {
@@ -121,13 +121,13 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
   const handleDownload = async () => {
     if (!selectedRemote || selectedRemote.type !== 'file' || !tab.sessionId) return
     setTransferring(true)
-    setTransferMsg(`Baixando ${selectedRemote.name}…`)
+    setTransferMsg(`Downloading ${selectedRemote.name}…`)
     setError(null)
     try {
       const src = joinPath(remotePath, selectedRemote.name)
       const dst = joinPath(localPath, selectedRemote.name)
       await window.api.sftp.downloadDirect(tab.sessionId, src, dst)
-      setTransferMsg(`${selectedRemote.name} baixado`)
+      setTransferMsg(`${selectedRemote.name} downloaded`)
       setTimeout(() => setTransferMsg(''), 2500)
       loadLocal(localPath)
     } catch (e: any) {
@@ -200,7 +200,7 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
           <button
             onClick={handleUpload}
             disabled={!uploadReady}
-            title="Enviar para servidor →"
+            title="Upload to server →"
             className="flex items-center justify-center rounded-lg"
             style={{
               width: 34, height: 34,
@@ -216,7 +216,7 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
           <button
             onClick={handleDownload}
             disabled={!downloadReady}
-            title="← Baixar do servidor"
+            title="← Download from server"
             className="flex items-center justify-center rounded-lg"
             style={{
               width: 34, height: 34,
@@ -233,7 +233,7 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
 
         {/* Remote pane */}
         <FilePane
-          title="SERVIDOR"
+          title="SERVER"
           path={remotePath}
           entries={remoteEntries}
           loading={remoteLoading}
@@ -293,7 +293,7 @@ function FilePane({
             cursor: canGoParent ? 'pointer' : 'default',
             background: 'transparent'
           }}
-          title="Pasta acima"
+          title="Go up"
         >
           <ArrowLeft size={12} />
         </button>
@@ -301,7 +301,7 @@ function FilePane({
           onClick={onRefresh}
           className="flex items-center justify-center w-6 h-6 rounded"
           style={{ color: 'var(--text-secondary)', background: 'transparent' }}
-          title="Atualizar"
+          title="Refresh"
         >
           <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
         </button>
@@ -322,7 +322,7 @@ function FilePane({
           </div>
         ) : entries.length === 0 ? (
           <div className="flex items-center justify-center h-24">
-            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Pasta vazia</span>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Empty folder</span>
           </div>
         ) : (
           entries.map((entry) => {

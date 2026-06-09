@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, nativeImage } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
@@ -48,6 +48,10 @@ function setupAutoUpdater(): void {
 }
 
 function createWindow(): void {
+  // process.resourcesPath aponta para a pasta resources/ fora do asar
+  const iconPath = join(process.resourcesPath, 'icon.png')
+  const appIcon = nativeImage.createFromPath(iconPath)
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -57,6 +61,7 @@ function createWindow(): void {
     frame: false,
     titleBarStyle: 'hidden',
     backgroundColor: '#0d1117',
+    icon: appIcon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,

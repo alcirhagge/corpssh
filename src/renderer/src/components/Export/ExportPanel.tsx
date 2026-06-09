@@ -6,22 +6,20 @@ export default function ExportPanel() {
   const { servers, groups, upsertServer, upsertGroup } = useAppStore()
   const [state, setState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
   const [message, setMessage] = useState('')
+  const [includeCredentials, setIncludeCredentials] = useState(false)
 
   const handleExport = async () => {
     setState('loading')
     try {
-      const path = await window.api.xml.export()
-      if (path) { setState('ok'); setMessage(`Exportado para: ${path}`) }
-      else setState('idle')
-    } catch (e: any) { setState('error'); setMessage(e.message) }
-  }
-
-  const handleExportWithCredentials = async () => {
-    setState('loading')
-    try {
-      const path = await window.api.xml.exportWithCredentials()
-      if (path) { setState('ok'); setMessage(`Exportado com credenciais para: ${path}`) }
-      else setState('idle')
+      const path = includeCredentials
+        ? await window.api.xml.exportWithCredentials()
+        : await window.api.xml.export()
+      if (path) {
+        setState('ok')
+        setMessage(includeCredentials ? `Exported with credentials to: ${path}` : `Exported to: ${path}`)
+      } else {
+        setState('idle')
+      }
     } catch (e: any) { setState('error'); setMessage(e.message) }
   }
 
@@ -33,7 +31,7 @@ export default function ExportPanel() {
         result.servers.forEach(upsertServer)
         result.groups.forEach(upsertGroup)
         setState('ok')
-        setMessage(`Importado: ${result.servers.length} servidores, ${result.groups.length} grupos`)
+        setMessage(`Imported: ${result.servers.length} server${result.servers.length !== 1 ? 's' : ''}, ${result.groups.length} group${result.groups.length !== 1 ? 's' : ''}`)
       } else {
         setState('idle')
       }
@@ -64,41 +62,81 @@ export default function ExportPanel() {
               Export / Import
             </h2>
             <p className="mt-1" style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-              Salve e restaure sua lista de servidores e grupos em formato XML.
+              Save and restore your server and group list in XML format.
             </p>
           </div>
 
           {/* Stats */}
           <div className="grid grid-cols-2 gap-3">
-            <StatCard label="Servidores" value={servers.length} color="var(--accent)" />
-            <StatCard label="Grupos" value={groups.length} color="var(--purple)" />
+            <StatCard label="Servers" value={servers.length} color="var(--accent)" />
+            <StatCard label="Groups" value={groups.length} color="var(--purple)" />
           </div>
 
           {/* Actions */}
           <div className="flex flex-col gap-3">
-            <ActionCard
-              icon={<FileDown size={22} />}
-              title="Exportar para XML"
-              description="Salva todos os servidores e grupos num arquivo .xml que pode ser importado em outro computador. Senhas não são incluídas."
-              buttonLabel="Exportar"
-              buttonColor="var(--accent)"
-              onClick={handleExport}
-              loading={state === 'loading'}
-            />
-            <ActionCard
-              icon={<ShieldAlert size={22} />}
-              title="Exportar com credenciais"
-              description="Inclui senhas e chaves no arquivo XML. Use apenas em ambiente seguro — as credenciais ficam em texto puro no arquivo."
-              buttonLabel="Exportar"
-              buttonColor="var(--warning, #f7b731)"
-              onClick={handleExportWithCredentials}
-              loading={state === 'loading'}
-            />
+            {/* Export card with inline credential checkbox */}
+            <div
+              className="flex items-start gap-4 p-4 rounded-xl"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+            >
+              <div
+                className="flex items-center justify-center w-11 h-11 rounded-xl flex-shrink-0"
+                style={{
+                  background: includeCredentials ? 'rgba(247,183,49,0.13)' : 'rgba(59,130,246,0.12)',
+                  color: includeCredentials ? 'var(--warning, #f7b731)' : 'var(--accent)',
+                  transition: 'all 0.15s'
+                }}
+              >
+                {includeCredentials ? <ShieldAlert size={22} /> : <FileDown size={22} />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 14 }}>
+                  Export to XML
+                </p>
+                <p className="mt-0.5" style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                  Saves all servers and groups to an .xml file importable on another machine.
+                </p>
+                <label
+                  className="flex items-center gap-2 mt-2.5 cursor-pointer"
+                  style={{ width: 'fit-content' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={includeCredentials}
+                    onChange={(e) => setIncludeCredentials(e.target.checked)}
+                    style={{ accentColor: 'var(--warning, #f7b731)', width: 14, height: 14, cursor: 'pointer' }}
+                  />
+                  <span style={{
+                    fontSize: 12,
+                    color: includeCredentials ? 'var(--warning, #f7b731)' : 'var(--text-secondary)',
+                    transition: 'color 0.15s'
+                  }}>
+                    Export with credentials (user &amp; password)
+                  </span>
+                </label>
+              </div>
+              <button
+                onClick={handleExport}
+                disabled={state === 'loading'}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium flex-shrink-0"
+                style={{
+                  background: includeCredentials ? 'var(--warning, #f7b731)' : 'var(--accent)',
+                  color: includeCredentials ? '#1a1100' : '#fff',
+                  opacity: state === 'loading' ? 0.7 : 1,
+                  fontSize: 13,
+                  transition: 'background 0.15s, color 0.15s'
+                }}
+              >
+                {state === 'loading' ? <RefreshCw size={12} className="animate-spin" /> : null}
+                Export
+              </button>
+            </div>
+
             <ActionCard
               icon={<FileUp size={22} />}
-              title="Importar de XML"
-              description="Carrega servidores e grupos a partir de um arquivo .xml exportado anteriormente. Dados existentes não são removidos."
-              buttonLabel="Importar"
+              title="Import from XML"
+              description="Loads servers and groups from a previously exported .xml file. Existing data is not removed."
+              buttonLabel="Import"
               buttonColor="var(--success)"
               onClick={handleImport}
               loading={state === 'loading'}
@@ -131,7 +169,7 @@ export default function ExportPanel() {
           <div className="flex items-center gap-2 mb-4">
             <FileCode size={15} style={{ color: 'var(--text-muted)' }} />
             <span className="font-semibold" style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-              Formato XML
+              XML Format
             </span>
           </div>
           <pre

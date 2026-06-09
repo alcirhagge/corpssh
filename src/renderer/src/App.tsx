@@ -46,7 +46,14 @@ export default function App() {
 
     // Listen for new log entries from main process
     const unsub = window.api.log.onNew((entry) => addLog(entry as LogEntry))
-    return unsub
+
+    // Listen for OS detection results pushed from the main process after connect
+    const unsubOs = window.api.ssh.onOsDetected(({ id, detectedOs }) => {
+      const server = useAppStore.getState().servers.find((s) => s.id === id)
+      if (server) upsertServer({ ...server, detectedOs })
+    })
+
+    return () => { unsub(); unsubOs() }
   }, [])
 
   const openSSHTab = async (server: Server, mode: 'terminal' | 'sftp') => {
@@ -74,7 +81,7 @@ export default function App() {
       })
       updateTab(tabId, { sessionId, status: 'connected', connectedAt: Date.now() })
     } catch (e: any) {
-      updateTab(tabId, { status: 'error', errorMessage: e.message || 'Falha na conexao' })
+      updateTab(tabId, { status: 'error', errorMessage: e.message || 'Connection failed' })
     }
   }
 
@@ -93,7 +100,7 @@ export default function App() {
     }
 
     if (proto === 'vnc') {
-      alert('VNC: Função sendo implementada.\nEsta funcionalidade ainda não está disponível nesta versão.')
+      alert('VNC: Feature in development.\nThis functionality is not yet available in this version.')
       return
     }
 
@@ -160,13 +167,15 @@ export default function App() {
           )}
 
           {/* Page content */}
-          <div className="flex flex-1 overflow-hidden">
-            {/* Hosts dashboard */}
+          <div className="flex flex-1 overflow-hidden relative">
+            {/* Hosts dashboard — sempre ocupa 100% da largura; o form fica em overlay */}
             {showHosts && (
-              <>
-                <HostDashboard onConnect={handleConnectServer} onConnectSftp={handleConnectSftp} />
-                {showRightPanel && <HostForm onConnect={handleConnectServer} />}
-              </>
+              <HostDashboard onConnect={handleConnectServer} onConnectSftp={handleConnectSftp} />
+            )}
+            {showRightPanel && showHosts && (
+              <div className="absolute inset-y-0 right-0" style={{ zIndex: 20 }}>
+                <HostForm onConnect={handleConnectServer} />
+              </div>
             )}
 
             {/* Terminal sessions — SEMPRE no DOM quando há tabs, só esconde visualmente.
@@ -190,7 +199,7 @@ export default function App() {
                     {tab.status === 'error' && (
                       <ErrorScreen
                         name={tab.serverName}
-                        error={tab.errorMessage ?? 'Erro desconhecido'}
+                        error={tab.errorMessage ?? 'Unknown error'}
                         onRetry={() => {
                           const server = servers.find((s) => s.id === tab.serverId)
                           if (server) { removeTab(tab.id); handleConnectServer(server) }
@@ -228,13 +237,13 @@ export default function App() {
             {/* Estado vazio da página terminal */}
             {showTerminal && tabs.length === 0 && (
               <div className="flex flex-col items-center justify-center flex-1 gap-3" style={{ color: 'var(--text-muted)' }}>
-                <p className="text-sm">Nenhuma sessao ativa</p>
+                <p className="text-sm">No active sessions</p>
                 <button
                   onClick={() => setActivePage('hosts')}
                   className="px-3 py-1.5 rounded-lg text-xs"
                   style={{ background: 'var(--accent)', color: '#fff' }}
                 >
-                  Ir para Hosts
+                  Go to Hosts
                 </button>
               </div>
             )}
@@ -258,7 +267,7 @@ function LoadingScreen({ name, host }: { name: string; host: string }) {
       <div className="w-10 h-10 rounded-full border-2 animate-spin"
         style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
       <div className="text-center">
-        <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Conectando a {name}</p>
+        <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Connecting to {name}</p>
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{host}</p>
       </div>
     </div>
@@ -268,28 +277,28 @@ function LoadingScreen({ name, host }: { name: string; host: string }) {
 function friendlyError(raw: string): { title: string; detail: string } {
   const r = raw.toLowerCase()
   if (r.includes('all configured authentication methods failed') || r.includes('auth fail'))
-    return { title: 'Credenciais inválidas', detail: 'Verifique o usuário e a senha e tente novamente.' }
+    return { title: 'Invalid credentials', detail: 'Check your username and password and try again.' }
   if (r.includes('no matching key exchange'))
-    return { title: 'Algoritmo de segurança incompatível', detail: 'O servidor usa criptografia antiga. Tente novamente — o CorpSSH já inclui suporte a algoritmos legados.' }
+    return { title: 'Incompatible security algorithm', detail: 'The server uses legacy encryption. Try again — CorpSSH already includes support for legacy algorithms.' }
   if (r.includes('handshake failed'))
-    return { title: 'Falha no handshake SSH', detail: 'O servidor recusou a negociação de segurança. Verifique as configurações do host.' }
+    return { title: 'SSH handshake failed', detail: 'The server rejected the security negotiation. Check the host configuration.' }
   if (r.includes('econnrefused') || r.includes('connection refused'))
-    return { title: 'Conexão recusada', detail: 'O servidor não está aceitando conexões. Verifique o host, porta e se o SSH está ativo.' }
+    return { title: 'Connection refused', detail: 'The server is not accepting connections. Check the host, port, and whether SSH is active.' }
   if (r.includes('ehostunreach') || r.includes('host unreachable'))
-    return { title: 'Host inacessível', detail: 'Não foi possível alcançar o servidor. Verifique o IP e a conectividade de rede.' }
+    return { title: 'Host unreachable', detail: 'Could not reach the server. Check the IP address and network connectivity.' }
   if (r.includes('etimedout') || r.includes('timed out') || r.includes('timeout'))
-    return { title: 'Tempo esgotado', detail: 'O servidor demorou demais para responder. Verifique se o host está acessível.' }
+    return { title: 'Connection timed out', detail: 'The server took too long to respond. Check whether the host is accessible.' }
   if (r.includes('enotfound'))
-    return { title: 'Host não encontrado', detail: 'O endereço do servidor não foi resolvido. Verifique o nome ou IP.' }
+    return { title: 'Host not found', detail: 'The server address could not be resolved. Check the hostname or IP.' }
   if (r.includes('cannot read private key') || r.includes('private key'))
-    return { title: 'Erro na chave privada', detail: 'Não foi possível ler a chave. Verifique o arquivo e a passphrase.' }
+    return { title: 'Private key error', detail: 'Could not read the key file. Check the file path and passphrase.' }
   if (r.includes('socket hang up') || r.includes('connection reset'))
-    return { title: 'Conexão interrompida', detail: 'O servidor encerrou a conexão inesperadamente.' }
+    return { title: 'Connection interrupted', detail: 'The server closed the connection unexpectedly.' }
   if (r.includes('keepalive'))
-    return { title: 'Sessão expirada', detail: 'A conexão foi encerrada por inatividade.' }
+    return { title: 'Session expired', detail: 'The connection was closed due to inactivity.' }
   // fallback — strip the electron IPC prefix for cleaner display
   const clean = raw.replace(/^Error invoking remote method '[^']+': /, '').replace(/^Error: /, '')
-  return { title: 'Falha ao conectar', detail: clean }
+  return { title: 'Connection failed', detail: clean }
 }
 
 function ErrorScreen({ name, error, onRetry, onClose }: {
@@ -301,16 +310,16 @@ function ErrorScreen({ name, error, onRetry, onClose }: {
       <div className="w-12 h-12 rounded-full flex items-center justify-center text-2xl"
         style={{ background: 'var(--error-subtle)' }}>✕</div>
       <div className="text-center" style={{ maxWidth: 320 }}>
-        <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Falha ao conectar em {name}</p>
+        <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Failed to connect to {name}</p>
         <p className="font-semibold mt-2" style={{ color: 'var(--error)', fontSize: 14 }}>{title}</p>
         <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{detail}</p>
       </div>
       <div className="flex gap-2">
         <button onClick={onRetry} className="px-4 py-1.5 rounded-lg text-xs font-medium"
-          style={{ background: 'var(--accent)', color: '#fff' }}>Tentar novamente</button>
+          style={{ background: 'var(--accent)', color: '#fff' }}>Try again</button>
         <button onClick={onClose} className="px-4 py-1.5 rounded-lg text-xs"
           style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-          Fechar
+          Close
         </button>
       </div>
     </div>

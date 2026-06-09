@@ -28,6 +28,7 @@ export interface ServerRecord {
   tags?: string[]
   lastConnected?: number
   notes?: string
+  detectedOs?: string
 }
 
 export interface GroupRecord {

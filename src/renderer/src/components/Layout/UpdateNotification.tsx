@@ -57,9 +57,9 @@ export default function UpdateNotification() {
             : <Download size={13} style={{ color: 'var(--accent)' }} />
           }
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-            {state.phase === 'available' && 'Nova versao disponivel'}
-            {state.phase === 'downloading' && 'Baixando atualizacao...'}
-            {state.phase === 'ready' && 'Atualizado'}
+            {state.phase === 'available' && 'New version available'}
+            {state.phase === 'downloading' && 'Downloading update...'}
+            {state.phase === 'ready' && 'Update ready'}
           </span>
         </div>
         {state.phase !== 'downloading' && (
@@ -76,7 +76,7 @@ export default function UpdateNotification() {
       <div className="px-4 pb-3">
         {state.phase === 'available' && (
           <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-            Versao {state.version} sera baixada em background e instalada automaticamente ao fechar o app.
+            Version {state.version} will be downloaded in the background and installed automatically when you close the app.
           </p>
         )}
 
@@ -98,14 +98,14 @@ export default function UpdateNotification() {
         {state.phase === 'ready' && (
           <>
             <p className="text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
-              Versao {state.version} pronta. O app vai atualizar automaticamente ao fechar.
+              Version {state.version} ready. The app will update automatically when closed.
             </p>
             <button
               onClick={() => window.api.updater.install()}
               className="w-full py-1.5 rounded-lg text-xs font-medium"
               style={{ background: 'var(--accent)', color: '#fff' }}
             >
-              Reiniciar agora
+              Restart now
             </button>
           </>
         )}

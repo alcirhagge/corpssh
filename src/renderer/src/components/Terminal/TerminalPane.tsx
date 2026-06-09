@@ -112,9 +112,15 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
     }
     container.addEventListener('paste', onPaste, true)
 
-    // Right-click paste
-    container.addEventListener('contextmenu', () => {
-      navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text) }).catch(() => {})
+    // Right-click: copy if selection, paste if not
+    container.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      if (terminal.hasSelection()) {
+        navigator.clipboard.writeText(terminal.getSelection()).catch(() => {})
+        terminal.clearSelection()
+      } else {
+        navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text) }).catch(() => {})
+      }
     })
 
     // Input → SSH + session log
@@ -139,7 +145,7 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
     })
 
     const unsubClosed = window.api.ssh.onClosed(tab.sessionId!, () => {
-      terminal.write('\r\n\x1b[33m[Sessão encerrada]\x1b[0m\r\n')
+      terminal.write('\r\n\x1b[33m[Session closed]\x1b[0m\r\n')
       setIsDisconnected(true)
       updateTab(tab.id, { status: 'disconnected' })
     })
@@ -161,7 +167,7 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
       shellOpened = true
       window.api.ssh.shell(tab.sessionId!, cols, rows)
         .catch((err: any) => {
-          terminal.write(`\r\n\x1b[31m[Erro ao abrir shell: ${err?.message ?? err}]\x1b[0m\r\n`)
+          terminal.write(`\r\n\x1b[31m[Error opening shell: ${err?.message ?? err}]\x1b[0m\r\n`)
         })
       terminal.focus()
     }, 50)
@@ -205,7 +211,7 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
             style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', minWidth: 280 }}
           >
             <div style={{ color: 'var(--warning, #f7b731)', fontSize: 14, fontWeight: 600 }}>
-              Sessão encerrada
+              Session closed
             </div>
             <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
               {tab.serverName}<br />{tab.serverHost}
@@ -216,14 +222,14 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
                 className="px-5 py-2 rounded-lg text-xs font-semibold"
                 style={{ background: 'var(--accent)', color: '#fff' }}
               >
-                Reconectar
+                Reconnect
               </button>
               <button
                 onClick={onClose}
                 className="px-4 py-2 rounded-lg text-xs"
                 style={{ background: 'var(--bg-active)', color: 'var(--text-primary)' }}
               >
-                Fechar
+                Close
               </button>
             </div>
           </div>
@@ -243,7 +249,7 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
               if (e.key === 'Enter') handleSearch(e.shiftKey ? 'prev' : 'next')
               if (e.key === 'Escape') { setShowSearch(false); terminalRef.current?.focus() }
             }}
-            placeholder="Buscar..."
+            placeholder="Search..."
             className="text-xs w-40"
             style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', padding: 0 }}
           />

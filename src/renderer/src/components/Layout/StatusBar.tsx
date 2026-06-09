@@ -25,14 +25,14 @@ export default function StatusBar() {
             <span style={{ color: 'var(--text-secondary)' }}>{activeTab.serverName}</span>
             <span style={{ color: 'var(--text-muted)' }}>{activeTab.serverHost}</span>
             {activeTab.status === 'connecting' && (
-              <span style={{ color: 'var(--warning)' }}>Conectando...</span>
+              <span style={{ color: 'var(--warning)' }}>Connecting...</span>
             )}
             {activeTab.status === 'error' && (
               <span style={{ color: 'var(--error)' }}>{activeTab.errorMessage}</span>
             )}
           </>
         ) : (
-          <span>Pronto</span>
+          <span>Ready</span>
         )}
       </div>
 
@@ -40,7 +40,7 @@ export default function StatusBar() {
         {connectedCount > 0 && (
           <div className="flex items-center gap-1" style={{ color: 'var(--success)' }}>
             <Wifi size={10} />
-            <span>{connectedCount} sessão{connectedCount !== 1 ? 'ões' : ''} ativa{connectedCount !== 1 ? 's' : ''}</span>
+            <span>{connectedCount} active session{connectedCount !== 1 ? 's' : ''}</span>
           </div>
         )}
         <span style={{ color: 'var(--text-muted)' }}>v{__APP_VERSION__}</span>

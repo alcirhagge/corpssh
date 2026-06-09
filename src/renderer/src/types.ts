@@ -21,6 +21,7 @@ export interface Server {
   tags?: string[]
   lastConnected?: number
   notes?: string
+  detectedOs?: string
 }
 
 export interface Group {

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { Minus, Maximize2, Minimize2, X, Terminal } from 'lucide-react'
+import { Minus, Maximize2, Minimize2, X } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { THEMES, applyTheme, getThemeBase } from '../../themes'
 
@@ -43,16 +43,23 @@ export default function TitleBar() {
       style={{ background: 'var(--titlebar-bg)', borderBottom: '1px solid var(--border-subtle)', height: 52 }}
     >
       {/* Left: Logo */}
-      <div className="flex items-center gap-2 no-drag">
-        <div
-          className="flex items-center justify-center w-6 h-6 rounded-md"
-          style={{ background: 'var(--accent)', color: '#fff' }}
-        >
-          <Terminal size={13} strokeWidth={2.5} />
+      <div className="flex items-center gap-2.5 no-drag">
+        <CorpSSHLogo size={28} />
+        <div className="flex flex-col" style={{ lineHeight: 1, gap: 1 }}>
+          <span style={{
+            fontWeight: 700,
+            fontSize: 14,
+            letterSpacing: '-0.03em',
+            color: 'var(--text-primary)'
+          }}>
+            Corp<span style={{
+              background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text'
+            }}>SSH</span>
+          </span>
         </div>
-        <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-          CorpSSH
-        </span>
       </div>
 
       {/* Center: drag */}
@@ -71,7 +78,7 @@ export default function TitleBar() {
             }}
             onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
             onMouseLeave={(e) => (e.currentTarget.style.background = pickerOpen ? 'var(--bg-hover)' : 'transparent')}
-            title="Tema"
+            title="Theme"
           >
             <span style={{ fontSize: 14 }}>🎨</span>
           </button>
@@ -82,7 +89,7 @@ export default function TitleBar() {
               style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', width: 200 }}
             >
               <p className="text-xs font-semibold px-1 pb-1.5 mb-1" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)' }}>
-                Escuro
+                Dark
               </p>
               <div className="grid grid-cols-3 gap-1.5 mb-2">
                 {THEMES.filter((t) => t.base === 'dark').map((t) => (
@@ -90,7 +97,7 @@ export default function TitleBar() {
                 ))}
               </div>
               <p className="text-xs font-semibold px-1 pb-1.5 mb-1" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)' }}>
-                Claro
+                Light
               </p>
               <div className="grid grid-cols-3 gap-1.5">
                 {THEMES.filter((t) => t.base === 'light').map((t) => (
@@ -104,13 +111,13 @@ export default function TitleBar() {
         <div style={{ width: 1, height: 16, background: 'var(--border-subtle)', margin: '0 4px' }} />
 
         {/* Window controls */}
-        <WinBtn onClick={() => window.api.window.minimize()} title="Minimizar" hoverColor="var(--bg-hover)">
+        <WinBtn onClick={() => window.api.window.minimize()} title="Minimize" hoverColor="var(--bg-hover)">
           <Minus size={18} />
         </WinBtn>
-        <WinBtn onClick={() => window.api.window.maximize()} title={isMaximized ? 'Restaurar' : 'Maximizar'} hoverColor="var(--bg-hover)">
+        <WinBtn onClick={() => window.api.window.maximize()} title={isMaximized ? 'Restore' : 'Maximize'} hoverColor="var(--bg-hover)">
           {isMaximized ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
         </WinBtn>
-        <WinBtn onClick={() => window.api.window.close()} title="Fechar" hoverColor="var(--error)" hoverTextColor="#fff">
+        <WinBtn onClick={() => window.api.window.close()} title="Close" hoverColor="var(--error)" hoverTextColor="#fff">
           <X size={18} />
         </WinBtn>
       </div>
@@ -144,6 +151,31 @@ function ThemeSwatch({ theme, active, onClick }: { theme: typeof THEMES[0]; acti
         {theme.name}
       </span>
     </button>
+  )
+}
+
+function CorpSSHLogo({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="csg-bg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#2563eb"/>
+          <stop offset="100%" stopColor="#1e40af"/>
+        </linearGradient>
+        <linearGradient id="csg-shine" x1="0" y1="0" x2="0" y2="16" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="white" stopOpacity="0.18"/>
+          <stop offset="100%" stopColor="white" stopOpacity="0"/>
+        </linearGradient>
+      </defs>
+      {/* base */}
+      <rect width="32" height="32" rx="8" fill="url(#csg-bg)"/>
+      {/* top shine */}
+      <rect width="32" height="16" rx="8" fill="url(#csg-shine)"/>
+      {/* > chevron */}
+      <path d="M7 11L14 16L7 21" stroke="white" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"/>
+      {/* _ cursor */}
+      <path d="M16.5 21H25" stroke="white" strokeWidth="2.6" strokeLinecap="round"/>
+    </svg>
   )
 }
 

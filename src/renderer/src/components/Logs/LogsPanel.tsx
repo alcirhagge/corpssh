@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   Trash2, RefreshCw, Download, CheckCircle, XCircle, Wifi,
   Activity, FileText, ChevronLeft, Search, Terminal, AlertCircle,
-  LogIn, LogOut, Filter
+  LogIn, LogOut, Filter, Copy
 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { LogEntry, RemoteLogConfig } from '../../types'
@@ -21,7 +21,7 @@ function formatDur(ms?: number): string {
 }
 
 function formatTs(ts: number): string {
-  return new Date(ts).toLocaleString('pt-BR', {
+  return new Date(ts).toLocaleString('en-US', {
     day: '2-digit', month: '2-digit', year: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit'
   })
@@ -29,9 +29,9 @@ function formatTs(ts: number): string {
 
 function formatTimeAgo(ts: number): string {
   const diff = Date.now() - ts
-  if (diff < 60000) return 'agora'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m atrás`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h atrás`
+  if (diff < 60000) return 'just now'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
   return formatTs(ts)
 }
 
@@ -48,6 +48,63 @@ function stripAnsi(str: string): string {
   }).join('\n')
 }
 
+// ─── ANSI color renderer ──────────────────────────────────────────────────────
+
+const ANSI_FG: Record<number, string> = {
+  30: '#4e4e4e', 31: '#cc3333', 32: '#4caf50', 33: '#c4a000',
+  34: '#5b8ed9', 35: '#b57bdb', 36: '#34c5c5', 37: '#d0cfcc',
+  90: '#888888', 91: '#ff5555', 92: '#55ff55', 93: '#ffff55',
+  94: '#5555ff', 95: '#ff55ff', 96: '#55ffff', 97: '#ffffff'
+}
+
+function xtermColor(n: number): string {
+  if (n < 8) return ['#000','#800000','#008000','#808000','#000080','#800080','#008080','#c0c0c0'][n]
+  if (n < 16) return ['#808080','#ff0000','#00ff00','#ffff00','#0000ff','#ff00ff','#00ffff','#fff'][n - 8]
+  if (n < 232) { const i = n - 16; return `rgb(${Math.floor(i/36)*51},${Math.floor((i%36)/6)*51},${(i%6)*51})` }
+  const v = (n - 232) * 10 + 8; return `rgb(${v},${v},${v})`
+}
+
+type AnsiSeg = { text: string; color?: string; bg?: string; bold?: boolean }
+
+function parseAnsiSegments(text: string): AnsiSeg[] {
+  const segs: AnsiSeg[] = []
+  let fg: string | undefined, bg: string | undefined, bold = false, cursor = 0
+  const re = /\x1b\[([0-9;]*)([A-Za-z])|\x9b[0-9;]*[A-Za-z]/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > cursor) segs.push({ text: text.slice(cursor, m.index), color: fg, bg, bold })
+    cursor = m.index + m[0].length
+    if (m[2] !== 'm') continue
+    const codes = m[1] ? m[1].split(';').map(Number) : [0]
+    for (let i = 0; i < codes.length; i++) {
+      const c = codes[i]
+      if (c === 0) { fg = undefined; bg = undefined; bold = false }
+      else if (c === 1) bold = true
+      else if (c === 22) bold = false
+      else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) fg = ANSI_FG[c]
+      else if (c === 39) fg = undefined
+      else if (c === 38 && codes[i+1] === 5) { fg = xtermColor(codes[i+2]); i += 2 }
+      else if (c === 48 && codes[i+1] === 5) { bg = xtermColor(codes[i+2]); i += 2 }
+      else if (c === 49) bg = undefined
+    }
+  }
+  if (cursor < text.length) segs.push({ text: text.slice(cursor), color: fg, bg, bold })
+  return segs
+}
+
+function AnsiLine({ text }: { text: string }) {
+  const segs = parseAnsiSegments(text)
+  return (
+    <>
+      {segs.map((s, i) => (
+        <span key={i} style={{ color: s.color, background: s.bg, fontWeight: s.bold ? 700 : undefined }}>
+          {s.text}
+        </span>
+      ))}
+    </>
+  )
+}
+
 const TYPE_CONFIG: Record<LogEntry['type'], { label: string; color: string; bg: string; Icon: React.FC<any> }> = {
   connect:    { label: 'CONNECT',    color: 'var(--success)', bg: 'var(--success-subtle)',  Icon: LogIn },
   disconnect: { label: 'DISCONNECT', color: 'var(--text-secondary)', bg: 'var(--bg-elevated)', Icon: LogOut },
@@ -59,7 +116,8 @@ export default function LogsPanel() {
   const { logs, setLogs, clearLogs, settings, setSettings } = useAppStore()
   const [tab, setTab] = useState<'events' | 'sessions' | 'remote'>('events')
   const [sessions, setSessions] = useState<SessionMeta[]>([])
-  const [viewingSession, setViewingSession] = useState<{ meta: SessionMeta; content: string } | null>(null)
+  const [viewingSession, setViewingSession] = useState<{ meta: SessionMeta; raw: string; content: string } | null>(null)
+  const [copied, setCopied] = useState(false)
   const [sessionSearch, setSessionSearch] = useState('')
   const [cmdOnly, setCmdOnly] = useState(false)
   const [remoteForm, setRemoteForm] = useState<RemoteLogConfig>(
@@ -82,7 +140,7 @@ export default function LogsPanel() {
   }, [tab])
 
   const handleClear = async () => {
-    if (!confirm('Limpar todos os eventos de log?')) return
+    if (!confirm('Clear all log events?')) return
     await window.api.log.clear()
     clearLogs()
   }
@@ -100,9 +158,17 @@ export default function LogsPanel() {
 
   const handleViewSession = async (meta: SessionMeta) => {
     const raw = await window.api.session.read(meta.sessionId)
-    setViewingSession({ meta, content: stripAnsi(raw) })
+    setViewingSession({ meta, raw, content: stripAnsi(raw) })
     setSessionSearch('')
     setCmdOnly(false)
+  }
+
+  const handleCopySession = () => {
+    const text = sessionContent.map(p => p.stripped).join('\n')
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    }).catch(() => {})
   }
 
   const handleDownloadSession = () => {
@@ -171,13 +237,18 @@ export default function LogsPanel() {
 
   const sessionContent = useMemo(() => {
     if (!viewingSession) return []
-    let lines = viewingSession.content.split('\n')
-    if (cmdOnly) lines = lines.filter((l) => l.includes('CMD>'))
+    const strippedLines = viewingSession.content.split('\n')
+    const rawLines = viewingSession.raw.split('\n').map(line => {
+      const parts = line.split('\r')
+      return parts[parts.length - 1]
+    })
+    let pairs = strippedLines.map((stripped, i) => ({ stripped, raw: rawLines[i] ?? stripped }))
+    if (cmdOnly) pairs = pairs.filter(p => p.stripped.includes('CMD>'))
     if (sessionSearch.trim()) {
       const q = sessionSearch.toLowerCase()
-      lines = lines.filter((l) => l.toLowerCase().includes(q))
+      pairs = pairs.filter(p => p.stripped.toLowerCase().includes(q))
     }
-    return lines
+    return pairs
   }, [viewingSession, cmdOnly, sessionSearch])
 
   const providers = [
@@ -195,8 +266,8 @@ export default function LogsPanel() {
         style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)', height: 44 }}
       >
         {([
-          { id: 'events',   label: 'Eventos',       icon: <Activity size={13} /> },
-          { id: 'sessions', label: 'Sessões',        icon: <FileText size={13} /> },
+          { id: 'events',   label: 'Events',   icon: <Activity size={13} /> },
+          { id: 'sessions', label: 'Sessions', icon: <FileText size={13} /> },
           { id: 'remote',   label: 'Remote Logging', icon: <Wifi size={13} /> }
         ] as const).map((t) => (
           <button
@@ -234,9 +305,9 @@ export default function LogsPanel() {
               style={{ background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)' }}
             >
               <StatPill label="Total" value={stats.total} color="var(--text-secondary)" />
-              <StatPill label="Conexões" value={stats.connects} color="var(--success)" />
-              <StatPill label="Erros" value={stats.errors} color="var(--error)" />
-              <StatPill label="Hoje" value={stats.todayConnects} color="var(--accent)" />
+              <StatPill label="Connections" value={stats.connects} color="var(--success)" />
+              <StatPill label="Errors" value={stats.errors} color="var(--error)" />
+              <StatPill label="Today" value={stats.todayConnects} color="var(--accent)" />
             </div>
           )}
 
@@ -250,7 +321,7 @@ export default function LogsPanel() {
               <input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filtrar por servidor, host, user..."
+                placeholder="Filter by server, host, user..."
                 style={{ paddingLeft: 28, fontSize: 12, padding: '5px 8px 5px 28px' }}
               />
             </div>
@@ -267,7 +338,7 @@ export default function LogsPanel() {
                     fontSize: 11, fontWeight: typeFilter === t ? 600 : 400
                   }}
                 >
-                  {t === 'all' ? 'Todos' : t === 'connect' ? 'Connect' : t === 'disconnect' ? 'Disconnect' : t === 'error' ? 'Error' : 'Auth Fail'}
+                  {t === 'all' ? 'All' : t === 'connect' ? 'Connect' : t === 'disconnect' ? 'Disconnect' : t === 'error' ? 'Error' : 'Auth Fail'}
                 </button>
               ))}
             </div>
@@ -275,14 +346,14 @@ export default function LogsPanel() {
             <button
               onClick={() => window.api.log.list().then(setLogs)}
               style={{ color: 'var(--text-muted)', background: 'none' }}
-              title="Atualizar"
+              title="Refresh"
             >
               <RefreshCw size={13} />
             </button>
-            <button onClick={handleExportCSV} style={{ color: 'var(--text-muted)', background: 'none' }} title="Exportar CSV">
+            <button onClick={handleExportCSV} style={{ color: 'var(--text-muted)', background: 'none' }} title="Export CSV">
               <Download size={13} />
             </button>
-            <button onClick={handleClear} style={{ color: 'var(--error)', background: 'none' }} title="Limpar logs">
+            <button onClick={handleClear} style={{ color: 'var(--error)', background: 'none' }} title="Clear logs">
               <Trash2 size={13} />
             </button>
           </div>
@@ -294,9 +365,9 @@ export default function LogsPanel() {
                 <Activity size={32} strokeWidth={1.5} />
                 <div className="text-center">
                   <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-                    {logs.length === 0 ? 'Nenhum evento registrado' : 'Nenhum resultado'}
+                    {logs.length === 0 ? 'No events recorded' : 'No results'}
                   </p>
-                  <p className="text-xs mt-1">Os eventos aparecerão aqui quando você conectar</p>
+                  <p className="text-xs mt-1">Events will appear here when you connect</p>
                 </div>
               </div>
             ) : (
@@ -304,13 +375,13 @@ export default function LogsPanel() {
                 <thead>
                   <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 1 }}>
                     {[
-                      { label: 'Tipo',     width: 100 },
-                      { label: 'Servidor', width: undefined },
+                      { label: 'Type',     width: 100 },
+                      { label: 'Server',   width: undefined },
                       { label: 'Host',     width: 160 },
-                      { label: 'Usuário',  width: 120 },
-                      { label: 'Quando',   width: 130 },
-                      { label: 'Duração',  width: 80 },
-                      { label: 'Mensagem', width: 200 }
+                      { label: 'User',     width: 120 },
+                      { label: 'When',     width: 130 },
+                      { label: 'Duration', width: 80 },
+                      { label: 'Message',  width: 200 }
                     ].map(({ label, width }) => (
                       <th
                         key={label}
@@ -347,7 +418,7 @@ export default function LogsPanel() {
                   style={{ color: 'var(--text-secondary)', background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
                 >
                   <ChevronLeft size={12} />
-                  Voltar
+                  Back
                 </button>
 
                 <div className="flex items-center gap-2 flex-1">
@@ -366,7 +437,7 @@ export default function LogsPanel() {
                       {' · '}
                       {viewingSession.meta.endedAt
                         ? formatDur(viewingSession.meta.endedAt - viewingSession.meta.startedAt)
-                        : <span style={{ color: 'var(--success)' }}>ativa</span>}
+                        : <span style={{ color: 'var(--success)' }}>active</span>}
                       {' · '}
                       {formatTs(viewingSession.meta.startedAt)}
                     </p>
@@ -380,7 +451,7 @@ export default function LogsPanel() {
                     <input
                       value={sessionSearch}
                       onChange={(e) => setSessionSearch(e.target.value)}
-                      placeholder="Buscar no log..."
+                      placeholder="Search in log..."
                       style={{ paddingLeft: 24, fontSize: 12, padding: '4px 8px 4px 24px', width: 160 }}
                     />
                   </div>
@@ -392,16 +463,30 @@ export default function LogsPanel() {
                       color: cmdOnly ? '#fff' : 'var(--text-secondary)',
                       border: `1px solid ${cmdOnly ? 'var(--accent)' : 'var(--border)'}`
                     }}
-                    title="Mostrar apenas comandos"
+                    title="Show commands only"
                   >
                     <Filter size={11} />
-                    Comandos
+                    Commands
+                  </button>
+                  <button
+                    onClick={handleCopySession}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
+                    style={{
+                      background: copied ? 'var(--success-subtle)' : 'var(--bg-elevated)',
+                      color: copied ? 'var(--success)' : 'var(--text-secondary)',
+                      border: `1px solid ${copied ? 'var(--success)' : 'var(--border)'}`,
+                      transition: 'all 0.15s'
+                    }}
+                    title="Copy visible content"
+                  >
+                    {copied ? <CheckCircle size={11} /> : <Copy size={11} />}
+                    {copied ? 'Copied' : 'Copy'}
                   </button>
                   <button
                     onClick={handleDownloadSession}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs"
                     style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-                    title="Baixar log completo"
+                    title="Download full log"
                   >
                     <Download size={11} />
                   </button>
@@ -414,8 +499,8 @@ export default function LogsPanel() {
                   className="px-4 py-1 text-xs flex-shrink-0"
                   style={{ background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
                 >
-                  {sessionContent.length} linha{sessionContent.length !== 1 ? 's' : ''}
-                  {cmdOnly && ' (apenas comandos)'}
+                  {sessionContent.length} line{sessionContent.length !== 1 ? 's' : ''}
+                  {cmdOnly && ' (commands only)'}
                   {sessionSearch && ` · "${sessionSearch}"`}
                 </div>
               )}
@@ -430,26 +515,24 @@ export default function LogsPanel() {
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-all',
                     lineHeight: 1.6,
-                    margin: 0
+                    margin: 0,
+                    userSelect: 'text',
+                    cursor: 'text'
                   }}
                 >
-                  {sessionContent.map((line, i) => {
-                    const isCmd = line.includes('CMD>')
-                    const isSeparator = line.startsWith('=')
-                    const isHeader = line.startsWith('Server') || line.startsWith('Host') || line.startsWith('User') || line.startsWith('Started') || line.startsWith('Session ended')
+                  {sessionContent.map(({ raw, stripped }, i) => {
+                    const isCmd = stripped.includes('CMD>')
+                    const isSeparator = stripped.startsWith('=')
+                    const isHeader = stripped.startsWith('Server') || stripped.startsWith('Host') || stripped.startsWith('User') || stripped.startsWith('Started') || stripped.startsWith('Session ended')
                     return (
-                      <span
-                        key={i}
-                        style={{
-                          color: isCmd
-                            ? 'var(--accent)'
-                            : isSeparator || isHeader
-                            ? 'var(--text-muted)'
-                            : undefined,
-                          fontWeight: isCmd ? 600 : undefined
-                        }}
-                      >
-                        {line}{'\n'}
+                      <span key={i} style={{ fontWeight: isCmd ? 600 : undefined }}>
+                        {isCmd || isSeparator || isHeader ? (
+                          <span style={{ color: isCmd ? 'var(--accent)' : 'var(--text-muted)' }}>
+                            {stripped}
+                          </span>
+                        ) : (
+                          <AnsiLine text={raw} />
+                        )}{'\n'}
                       </span>
                     )
                   })}
@@ -464,12 +547,12 @@ export default function LogsPanel() {
                 style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-subtle)' }}
               >
                 <p className="text-xs font-semibold flex-1" style={{ color: 'var(--text-primary)' }}>
-                  {sessions.length} sessão{sessions.length !== 1 ? 'ões' : ''} registrada{sessions.length !== 1 ? 's' : ''}
+                  {sessions.length} session{sessions.length !== 1 ? 's' : ''} recorded
                 </p>
                 <button
                   onClick={handleRefreshSessions}
                   style={{ color: 'var(--text-muted)', background: 'none' }}
-                  title="Atualizar lista"
+                  title="Refresh list"
                 >
                   <RefreshCw size={13} />
                 </button>
@@ -480,8 +563,8 @@ export default function LogsPanel() {
                   <div className="flex flex-col items-center justify-center h-48 gap-3" style={{ color: 'var(--text-muted)' }}>
                     <FileText size={32} strokeWidth={1.5} />
                     <div className="text-center">
-                      <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Nenhuma sessão registrada</p>
-                      <p className="text-xs mt-1">Inicie uma conexão SSH para gravar uma sessão</p>
+                      <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>No sessions recorded</p>
+                      <p className="text-xs mt-1">Start an SSH connection to record a session</p>
                     </div>
                   </div>
                 ) : (
@@ -515,19 +598,19 @@ export default function LogsPanel() {
             <div>
               <p className="text-sm font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>Remote Logging</p>
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                Envie eventos de conexão para um servidor de logs externo em tempo real.
+                Send connection events to an external log server in real time.
               </p>
             </div>
 
             <div className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
               <div>
-                <p className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>Ativar remote logging</p>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Envia eventos SSH para o servidor configurado</p>
+                <p className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>Enable remote logging</p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Sends SSH events to the configured server</p>
               </div>
               <Toggle value={remoteForm.enabled} onChange={(v) => setRemoteForm((f) => ({ ...f, enabled: v }))} />
             </div>
 
-            <FormRow label="Provedor">
+            <FormRow label="Provider">
               <select
                 value={remoteForm.provider}
                 onChange={(e) => {
@@ -544,11 +627,11 @@ export default function LogsPanel() {
               <input
                 value={remoteForm.host}
                 onChange={(e) => setRemoteForm((f) => ({ ...f, host: e.target.value }))}
-                placeholder="ex: graylog.empresa.com"
+                placeholder="e.g. graylog.company.com"
               />
             </FormRow>
 
-            <FormRow label="Porta">
+            <FormRow label="Port">
               <input
                 type="number"
                 value={remoteForm.port}
@@ -591,25 +674,25 @@ export default function LogsPanel() {
                 }}
               >
                 {testState === 'testing' ? <RefreshCw size={12} className="animate-spin" /> : <Wifi size={12} />}
-                Testar conexão
+                Test connection
               </button>
               <button
                 onClick={handleSaveRemote}
                 className="flex-1 py-2 rounded-lg text-xs font-medium"
                 style={{ background: 'var(--accent)', color: '#fff' }}
               >
-                Salvar
+                Save
               </button>
             </div>
 
             {testState === 'ok' && (
               <div className="flex items-center gap-2 px-3 py-2 rounded text-xs" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
-                <CheckCircle size={13} />{testMsg || 'Conexão bem-sucedida'}
+                <CheckCircle size={13} />{testMsg || 'Connection successful'}
               </div>
             )}
             {testState === 'fail' && (
               <div className="flex items-center gap-2 px-3 py-2 rounded text-xs" style={{ background: 'var(--error-subtle)', color: 'var(--error)' }}>
-                <XCircle size={13} />{testMsg || 'Falha na conexão'}
+                <XCircle size={13} />{testMsg || 'Connection failed'}
               </div>
             )}
           </div>
@@ -702,7 +785,7 @@ function SessionRow({ session, isActive, dur, onClick, onDelete }: {
               style={{ background: 'var(--success-subtle)', color: 'var(--success)', fontSize: 10, lineHeight: '16px' }}
             >
               <span className="status-dot connected" style={{ width: 5, height: 5 }} />
-              ativa
+              active
             </span>
           )}
         </div>
@@ -729,7 +812,7 @@ function SessionRow({ session, isActive, dur, onClick, onDelete }: {
           color: 'var(--error)', background: 'none',
           opacity: hovered ? 1 : 0, transition: 'opacity 0.1s'
         }}
-        title="Excluir sessão"
+        title="Delete session"
       >
         <Trash2 size={12} />
       </button>

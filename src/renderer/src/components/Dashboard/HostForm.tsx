@@ -66,6 +66,18 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
         const saved = await window.api.servers.save(toSave as Server)
         upsertServer(saved)
         serverIdRef.current = saved.id
+
+        // Detectar OS em background quando tiver credenciais suficientes
+        const canDetect = saved.protocol === 'ssh' &&
+          saved.host?.trim() && saved.username?.trim() &&
+          (saved.password?.trim() || saved.privateKeyPath?.trim() || saved.privateKeyContent?.trim())
+        if (canDetect && !saved.detectedOs) {
+          window.api.ssh.detectOs(saved).then((detectedOs: string) => {
+            if (detectedOs && detectedOs !== 'unknown') {
+              upsertServer({ ...saved, detectedOs })
+            }
+          }).catch(() => {})
+        }
       } catch (e: any) {
         // silent auto-save fail
       }
@@ -74,8 +86,8 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
   }, [form])
 
   const validate = () => {
-    if (!form.host?.trim()) return 'Host obrigatorio'
-    if (form.protocol !== 'vnc' && !form.username?.trim()) return 'Usuario obrigatorio'
+    if (!form.host?.trim()) return 'Host required'
+    if (form.protocol !== 'vnc' && !form.username?.trim()) return 'Username required'
     return ''
   }
 
@@ -115,7 +127,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
           </div>
           <div>
             <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {isEdit ? 'Editar Host' : 'New Host'}
+              {isEdit ? 'Edit Host' : 'New Host'}
             </p>
             {form.host && (
               <p className="text-xs" style={{ color: 'var(--text-muted)', fontSize: 10 }}>{form.host}</p>
@@ -153,33 +165,13 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
           ))}
         </div>
 
-        {/* Address + Port */}
-        <FormSection label="Address">
-          <div className="flex gap-2">
-            <input
-              value={form.host ?? ''}
-              onChange={(e) => set('host', e.target.value)}
-              placeholder="IP ou Hostname"
-              autoFocus
-              style={{ flex: 1 }}
-            />
-            <div style={{ width: 64 }}>
-              <input
-                type="number"
-                value={form.port ?? defaultPort(form.protocol ?? 'ssh')}
-                onChange={(e) => set('port', parseInt(e.target.value) || defaultPort(form.protocol ?? 'ssh'))}
-                min={1} max={65535}
-              />
-            </div>
-          </div>
-        </FormSection>
-
-        {/* General */}
-        <FormSection label="General">
+        {/* Nome / General */}
+        <FormSection label="Nome">
           <input
             value={form.name ?? ''}
             onChange={(e) => set('name', e.target.value)}
-            placeholder="Label (opcional)"
+            placeholder="Label (optional)"
+            autoFocus
             className="mb-2"
           />
           <select
@@ -187,7 +179,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
             onChange={(e) => set('groupId', e.target.value || undefined)}
             className="mb-2"
           >
-            <option value="">Sem grupo</option>
+            <option value="">No group</option>
             {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
           <div className="flex flex-wrap gap-1.5 mt-1">
@@ -207,6 +199,26 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
           </div>
         </FormSection>
 
+        {/* Address + Port */}
+        <FormSection label="Address">
+          <div className="flex gap-2">
+            <input
+              value={form.host ?? ''}
+              onChange={(e) => set('host', e.target.value)}
+              placeholder="IP or Hostname"
+              style={{ flex: 1 }}
+            />
+            <div style={{ width: 64 }}>
+              <input
+                type="number"
+                value={form.port ?? defaultPort(form.protocol ?? 'ssh')}
+                onChange={(e) => set('port', parseInt(e.target.value) || defaultPort(form.protocol ?? 'ssh'))}
+                min={1} max={65535}
+              />
+            </div>
+          </div>
+        </FormSection>
+
         {/* SSH section */}
         {form.protocol === 'ssh' && (
           <FormSection label="SSH">
@@ -221,7 +233,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
                 type={showPw ? 'text' : 'password'}
                 value={form.password ?? ''}
                 onChange={(e) => set('password', e.target.value)}
-                placeholder="Senha"
+                placeholder="Password"
                 style={{ paddingRight: 32 }}
               />
               <button onClick={() => setShowPw((v) => !v)}
@@ -247,7 +259,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
               }}>
                 {showKeySection ? '−' : '+'}
               </span>
-              Chave SSH
+              SSH Key
             </button>
 
             {showKeySection && (
@@ -272,7 +284,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
                     type={showPassphrase ? 'text' : 'password'}
                     value={form.passphrase ?? ''}
                     onChange={(e) => set('passphrase', e.target.value)}
-                    placeholder="Passphrase (opcional)"
+                    placeholder="Passphrase (optional)"
                     style={{ paddingRight: 32 }}
                   />
                   <button onClick={() => setShowPassphrase((v) => !v)}
@@ -300,7 +312,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
                 type={showPw ? 'text' : 'password'}
                 value={form.password ?? ''}
                 onChange={(e) => set('password', e.target.value)}
-                placeholder="Senha (opcional)"
+                placeholder="Password (optional)"
                 style={{ paddingRight: 32 }}
               />
               <button onClick={() => setShowPw((v) => !v)}
@@ -312,7 +324,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
             <input
               value={form.rdpDomain ?? ''}
               onChange={(e) => set('rdpDomain', e.target.value)}
-              placeholder="Domínio (opcional)"
+              placeholder="Domain (optional)"
               className="mb-2"
             />
             <label className="flex items-center gap-2 cursor-pointer">
@@ -323,7 +335,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
               >
                 <div className="absolute top-1 rounded-full bg-white" style={{ width: 10, height: 10, left: form.rdpFullscreen ? 18 : 4, transition: 'left 0.15s' }} />
               </div>
-              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Iniciar em tela cheia</span>
+              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Start fullscreen</span>
             </label>
           </FormSection>
         )}
@@ -337,10 +349,10 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
             >
               <span style={{ fontSize: 20 }}>🚧</span>
               <p className="text-xs font-semibold" style={{ color: 'var(--warning)' }}>
-                Função sendo implementada
+                Feature in development
               </p>
               <p className="text-xs" style={{ color: 'var(--text-muted)', fontSize: 10, lineHeight: 1.4 }}>
-                O suporte a VNC ainda está em desenvolvimento e não está disponível nesta versão.
+                VNC support is still in development and is not available in this version.
               </p>
             </div>
           </FormSection>
@@ -366,7 +378,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
             cursor: form.protocol === 'vnc' ? 'not-allowed' : 'pointer'
           }}
         >
-          {form.protocol === 'vnc' ? 'Indisponível' : 'Connect'}
+          {form.protocol === 'vnc' ? 'Unavailable' : 'Connect'}
         </button>
       </div>
     </div>

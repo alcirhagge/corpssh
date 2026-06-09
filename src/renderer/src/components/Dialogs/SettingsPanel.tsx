@@ -67,13 +67,13 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           style={{ width: 160, background: 'var(--bg-elevated)', borderRight: '1px solid var(--border)' }}
         >
           <div className="px-3 pb-2 mb-1" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-            <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Configurações</p>
+            <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Settings</p>
           </div>
           {([
-            ['appearance', 'Aparência', <Palette size={13} />],
+            ['appearance', 'Appearance', <Palette size={13} />],
             ['terminal', 'Terminal', <Terminal size={13} />],
-            ['keys', 'Chaves SSH', <Key size={13} />],
-            ['about', 'Sobre', <Info size={13} />]
+            ['keys', 'SSH Keys', <Key size={13} />],
+            ['about', 'About', <Info size={13} />]
           ] as const).map(([id, label, icon]) => (
             <NavItem
               key={id}
@@ -90,7 +90,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
             <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {section === 'appearance' ? 'Aparência' : section === 'terminal' ? 'Terminal' : section === 'keys' ? 'Chaves SSH' : 'Sobre'}
+              {section === 'appearance' ? 'Appearance' : section === 'terminal' ? 'Terminal' : section === 'keys' ? 'SSH Keys' : 'About'}
             </h3>
             <button onClick={onClose} className="flex items-center justify-center w-6 h-6 rounded" style={{ color: 'var(--text-secondary)' }}>
               <X size={14} />
@@ -103,9 +103,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               <div className="flex flex-col gap-5">
                 {/* Theme picker */}
                 <div>
-                  <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Tema</p>
+                  <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Theme</p>
                   <div className="mb-1">
-                    <p className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Escuro</p>
+                    <p className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Dark</p>
                     <div className="flex gap-2">
                       {THEMES.filter(t => t.base === 'dark').map(t => (
                         <SettingsThemeSwatch
@@ -118,7 +118,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </div>
                   </div>
                   <div className="mt-2">
-                    <p className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Claro</p>
+                    <p className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Light</p>
                     <div className="flex gap-2">
                       {THEMES.filter(t => t.base === 'light').map(t => (
                         <SettingsThemeSwatch
@@ -132,7 +132,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </div>
                 </div>
 
-                <SettingRow label="Tamanho da Interface" description="Tamanho do texto da interface (não terminal)">
+                <SettingRow label="UI Font Size" description="Interface text size (not terminal)">
                   <div className="flex items-center gap-2">
                     <input
                       type="range"
@@ -153,7 +153,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
 
             {section === 'terminal' && (
               <div className="flex flex-col gap-4">
-                <SettingRow label="Fonte do Terminal" description="Fonte monoespaçada usada no terminal">
+                <SettingRow label="Terminal Font" description="Monospaced font used in the terminal">
                   <select
                     value={form.fontFamily}
                     onChange={e => set('fontFamily', e.target.value)}
@@ -164,11 +164,11 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                     <option value="Source Code Pro, monospace">Source Code Pro</option>
                     <option value="Consolas, monospace">Consolas</option>
                     <option value="Courier New, monospace">Courier New</option>
-                    <option value="monospace">Monospace (sistema)</option>
+                    <option value="monospace">Monospace (system)</option>
                   </select>
                 </SettingRow>
 
-                <SettingRow label="Tamanho da Fonte" description="Tamanho em pixels">
+                <SettingRow label="Font Size" description="Size in pixels">
                   <div className="flex items-center gap-2">
                     <input
                       type="range"
@@ -184,7 +184,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </div>
                 </SettingRow>
 
-                <SettingRow label="Estilo do Cursor">
+                <SettingRow label="Cursor Style">
                   <div className="flex gap-2">
                     {(['block', 'bar', 'underline'] as const).map(style => (
                       <button
@@ -197,17 +197,17 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                           border: `1px solid ${form.cursorStyle === style ? 'var(--accent)' : 'var(--border)'}`
                         }}
                       >
-                        {style === 'block' ? 'Bloco' : style === 'bar' ? 'Barra' : 'Sublinhado'}
+                        {style === 'block' ? 'Block' : style === 'bar' ? 'Bar' : 'Underline'}
                       </button>
                     ))}
                   </div>
                 </SettingRow>
 
-                <SettingRow label="Cursor Piscando">
+                <SettingRow label="Blinking Cursor">
                   <Toggle value={form.cursorBlink} onChange={v => set('cursorBlink', v)} />
                 </SettingRow>
 
-                <SettingRow label="Scrollback" description="Número de linhas no histórico">
+                <SettingRow label="Scrollback" description="Number of lines in history">
                   <input
                     type="number"
                     value={form.scrollback}
@@ -223,14 +223,14 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               <div className="flex flex-col gap-3">
                 <div className="flex justify-between items-center">
                   <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {keys.length} chave{keys.length !== 1 ? 's' : ''} salva{keys.length !== 1 ? 's' : ''}
+                    {keys.length} saved key{keys.length !== 1 ? 's' : ''}
                   </p>
                   <button
                     onClick={addKey}
                     className="px-3 py-1 rounded-lg text-xs"
                     style={{ background: 'var(--accent)', color: '#fff' }}
                   >
-                    + Importar Chave
+                    + Import Key
                   </button>
                 </div>
                 {keys.map(key => (
@@ -255,24 +255,41 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 ))}
                 {keys.length === 0 && (
                   <div className="text-xs text-center py-8" style={{ color: 'var(--text-muted)' }}>
-                    Nenhuma chave importada
+                    No keys imported
                   </div>
                 )}
               </div>
             )}
 
             {section === 'about' && (
-              <div className="flex flex-col items-center justify-center gap-3 h-48">
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl" style={{ background: 'var(--accent)' }}>
+              <div className="flex flex-col items-center justify-center gap-4 py-8 px-6">
+                <div className="flex items-center justify-center w-16 h-16 rounded-2xl" style={{ background: 'var(--accent)', boxShadow: '0 8px 24px var(--accent-shadow, #0004)' }}>
                   <Terminal size={32} color="#fff" />
                 </div>
                 <div className="text-center">
-                  <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>CorpSSH</h3>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Versão 1.0.0</p>
-                  <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
-                    Cliente SSH corporativo com suporte a múltiplas conexões,<br />
-                    SFTP, chaves SSH e temas dark/light.
-                  </p>
+                  <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>CorpSSH</h3>
+                  <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--accent)' }}>v1.6.0</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>NBN Telecom — Network Operations</p>
+                </div>
+                <div
+                  className="w-full rounded-xl p-4 grid gap-2"
+                  style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', gridTemplateColumns: '1fr 1fr', maxWidth: 380 }}
+                >
+                  {[
+                    ['SSH Terminal', 'Multiple sessions in tabs'],
+                    ['SFTP', 'Remote file manager'],
+                    ['RDP', 'Remote Windows access'],
+                    ['Session Logs', 'Full session recording w/ ANSI colors'],
+                    ['OS Detection', 'Linux, MikroTik, OLT, ESP32...'],
+                    ['SSH Keys', 'Ed25519, RSA, PEM, PPK'],
+                    ['Remote Logging', 'Graylog, Loki, Elasticsearch'],
+                    ['Themes', 'Dark / Light / Navy'],
+                  ].map(([feat, desc]) => (
+                    <div key={feat} className="flex flex-col gap-0.5">
+                      <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)', fontSize: 11 }}>{feat}</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{desc}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -284,13 +301,13 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               className="flex items-center justify-end gap-2 px-4 py-3"
               style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-elevated)' }}
             >
-              {saved && <span className="text-xs" style={{ color: 'var(--success)' }}>Salvo!</span>}
+              {saved && <span className="text-xs" style={{ color: 'var(--success)' }}>Saved!</span>}
               <button
                 onClick={handleSave}
                 className="px-4 py-1.5 rounded-lg text-xs font-medium"
                 style={{ background: 'var(--accent)', color: '#fff' }}
               >
-                Salvar
+                Save
               </button>
             </div>
           )}

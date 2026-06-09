@@ -23,7 +23,7 @@ export default function WelcomeScreen({ serverCount, onAddServer }: WelcomeScree
             CorpSSH
           </h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-            Cliente SSH corporativo
+            Corporate SSH client
           </p>
         </div>
       </div>
@@ -35,7 +35,7 @@ export default function WelcomeScreen({ serverCount, onAddServer }: WelcomeScree
           style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}
         >
           <Server size={12} />
-          {serverCount} servidor{serverCount !== 1 ? 'es' : ''} configurado{serverCount !== 1 ? 's' : ''}
+          {serverCount} server{serverCount !== 1 ? 's' : ''} configured
         </div>
       )}
 
@@ -43,30 +43,30 @@ export default function WelcomeScreen({ serverCount, onAddServer }: WelcomeScree
       <div className="flex flex-col gap-3 w-64">
         <ActionCard
           icon={<Wifi size={18} />}
-          title="Conectar a um Servidor"
-          description="Clique duas vezes em um servidor na barra lateral"
+          title="Connect to a Server"
+          description="Double-click a server in the sidebar"
           color="var(--accent)"
         />
         <ActionCard
           icon={<Plus size={18} />}
-          title="Adicionar Servidor"
-          description="Configure uma nova conexão SSH"
+          title="Add Server"
+          description="Set up a new SSH connection"
           color="var(--success)"
           onClick={onAddServer}
           clickable
         />
         <ActionCard
           icon={<Key size={18} />}
-          title="Chaves SSH"
-          description="Gerencie suas chaves de autenticação"
+          title="SSH Keys"
+          description="Manage your authentication keys"
           color="var(--purple)"
         />
       </div>
 
       {/* Hint */}
       <p className="text-xs text-center" style={{ color: 'var(--text-muted)', maxWidth: 300 }}>
-        Dica: Clique duas vezes em um servidor na barra lateral para conectar,<br />
-        ou clique com o botão direito para mais opções.
+        Tip: Double-click a server to connect,<br />
+        or right-click for more options.
       </p>
     </div>
   )

@@ -50,6 +50,7 @@ const api = {
     resize: (sessionId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('ssh:resize', sessionId, cols, rows),
     disconnect: (sessionId: string) => ipcRenderer.invoke('ssh:disconnect', sessionId),
+    detectOs: (config: unknown) => ipcRenderer.invoke('ssh:detectOs', config),
     onData: (sessionId: string, cb: (data: string) => void) => {
       const channel = `ssh:data:${sessionId}`
       ipcRenderer.on(channel, (_e, data) => cb(data))
@@ -59,6 +60,10 @@ const api = {
       const channel = `ssh:closed:${sessionId}`
       ipcRenderer.on(channel, () => cb())
       return () => ipcRenderer.removeAllListeners(channel)
+    },
+    onOsDetected: (cb: (data: { id: string; detectedOs: string }) => void) => {
+      ipcRenderer.on('server:osDetected', (_e, data) => cb(data))
+      return () => ipcRenderer.removeAllListeners('server:osDetected')
     }
   },
 

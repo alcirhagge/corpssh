@@ -20,7 +20,9 @@ import {
   listSFTPDirectory,
   downloadFile,
   uploadFile,
-  deleteSFTPItem
+  deleteSFTPItem,
+  detectRemoteOs,
+  detectOsFromSession
 } from './sshManager'
 import {
   getServers,
@@ -49,9 +51,51 @@ function generateId(): string {
 // Track session meta for natural-disconnect logging
 const sessionMetaMap = new Map<string, { serverId: string; serverName: string; host: string; username: string; connectedAt: number }>()
 
+// Background OS scan at startup: SSH into every server that has no confirmed OS
+// and run the detection script. Results are pushed to the UI as they arrive.
+function runStartupOsScan(): void {
+  const toScan = getServers().filter((s) =>
+    (s.protocol ?? 'ssh') === 'ssh' && !s.detectedOs
+  )
+  if (toScan.length === 0) return
+
+  const CONCURRENCY = 5
+  let idx = 0
+
+  const runNext = async (): Promise<void> => {
+    if (idx >= toScan.length) return
+    const server = toScan[idx++]
+    try {
+      const detectedOs = await detectRemoteOs(server)
+      if (detectedOs && detectedOs !== 'unknown' && detectedOs !== 'linux') {
+        const fresh = getServers().find((s) => s.id === server.id)
+        if (fresh && fresh.detectedOs !== detectedOs) {
+          saveServer({ ...fresh, detectedOs })
+          BrowserWindow.getAllWindows()[0]?.webContents.send('server:osDetected', { id: server.id, detectedOs })
+        }
+      }
+    } catch {}
+    return runNext()
+  }
+
+  // Start CONCURRENCY workers in parallel
+  Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, toScan.length) }, () => runNext())
+  ).catch(() => {})
+}
+
 export function setupIpcHandlers(): void {
   // Close any sessions left open from a previous crash/force-quit
   cleanupOrphanedSessions()
+
+  // Clear stale 'linux' detections so they are re-scanned on startup
+  getServers().forEach((s) => {
+    if (s.detectedOs === 'linux') saveServer({ ...s, detectedOs: undefined })
+  })
+
+  // Run SSH-based OS detection for all servers without a confirmed OS.
+  // Delayed 4 s to let the renderer finish loading first.
+  setTimeout(() => runStartupOsScan(), 4000)
 
   // --- Server CRUD ---
   ipcMain.handle('servers:list', () => getServers())
@@ -213,11 +257,39 @@ export function setupIpcHandlers(): void {
     updateLastConnected(config.id)
     sessionMetaMap.set(sessionId, { serverId: config.id, serverName, host: hostLabel, username: config.username, connectedAt })
 
+    // Background OS detection using the open session (runs on every connect)
+    if (config.id) {
+      detectOsFromSession(sessionId).then((detectedOs) => {
+        // Only persist specific values; 'linux' and 'unknown' are weak fallbacks
+        if (detectedOs && detectedOs !== 'unknown' && detectedOs !== 'linux') {
+          const fresh = getServers().find((s) => s.id === config.id)
+          if (fresh && fresh.detectedOs !== detectedOs) {
+            saveServer({ ...fresh, detectedOs })
+            BrowserWindow.getAllWindows()[0]?.webContents.send('server:osDetected', { id: config.id, detectedOs })
+          }
+        }
+      }).catch(() => {})
+    }
+
     const entry = addLogEntry({ type: 'connect', serverId: config.id, serverName, host: hostLabel, username: config.username })
     createSessionLog({ sessionId, serverId: config.id, serverName, host: hostLabel, username: config.username, startedAt: connectedAt })
     win?.webContents.send('log:new', entry)
     sendRemoteLog(entry)
     return sessionId
+  })
+
+  ipcMain.handle('ssh:detectOs', async (_e, config) => {
+    try {
+      const detectedOs = await detectRemoteOs(config)
+      if (config.id && detectedOs) {
+        const servers = getServers()
+        const srv = servers.find((s) => s.id === config.id)
+        if (srv) saveServer({ ...srv, detectedOs })
+      }
+      return detectedOs
+    } catch {
+      return 'unknown'
+    }
   })
 
   ipcMain.handle('ssh:shell', async (_e, sessionId: string, cols: number, rows: number) => {

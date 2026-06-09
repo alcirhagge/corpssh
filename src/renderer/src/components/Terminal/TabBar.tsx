@@ -60,7 +60,7 @@ export default function TabBar({ onCloseTab, onNewTab, onToggleSftp, onConnectSe
         {/* Nova conexão */}
         <button
           onClick={() => setShowPicker(true)}
-          title="Nova conexão"
+          title="New connection"
           className="flex items-center justify-center h-full px-3 flex-shrink-0"
           style={{ color: 'var(--text-muted)', background: 'transparent' }}
           onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
@@ -84,19 +84,19 @@ export default function TabBar({ onCloseTab, onNewTab, onToggleSftp, onConnectSe
           >
             {ctxTab.status === 'connected' && (
               <CtxItem
-                label={ctxTab.mode === 'sftp' ? 'Voltar ao Terminal' : 'Abrir SFTP'}
+                label={ctxTab.mode === 'sftp' ? 'Switch to Terminal' : 'Open SFTP'}
                 icon={ctxTab.mode === 'sftp' ? '⌨' : '📁'}
                 onClick={() => { onToggleSftp(ctxTab.id); setCtxMenu(null) }}
               />
             )}
             <CtxItem
-              label="Novo terminal (mesmo servidor)"
+              label="New terminal (same server)"
               icon="＋"
               onClick={() => { onNewTab(ctxTab); setCtxMenu(null) }}
             />
             <div style={{ height: 1, margin: '3px 8px', background: 'var(--border)' }} />
             <CtxItem
-              label="Fechar aba"
+              label="Close tab"
               icon="✕"
               onClick={() => { onCloseTab(ctxTab); setCtxMenu(null) }}
               danger
@@ -160,7 +160,7 @@ function ServerPickerModal({ activeServerId, onSelect, onClose }: {
     if (items.length) sections.push({ label: g.name, items })
   })
   const ungrouped = byGroup.get('__none__') ?? []
-  if (ungrouped.length) sections.push({ label: groups.length > 0 ? 'Sem grupo' : 'Servidores', items: ungrouped })
+  if (ungrouped.length) sections.push({ label: groups.length > 0 ? 'No group' : 'Servers', items: ungrouped })
 
   return (
     <div
@@ -181,7 +181,7 @@ function ServerPickerModal({ activeServerId, onSelect, onClose }: {
         {/* Header */}
         <div className="flex items-center justify-between px-4 pt-4 pb-3 flex-shrink-0">
           <span className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 14 }}>
-            Nova conexão
+            New connection
           </span>
           <button
             onClick={onClose}
@@ -201,7 +201,7 @@ function ServerPickerModal({ activeServerId, onSelect, onClose }: {
             ref={inputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar servidor..."
+            placeholder="Search server..."
             style={{ paddingLeft: 32, fontSize: 13 }}
           />
         </div>
@@ -212,7 +212,7 @@ function ServerPickerModal({ activeServerId, onSelect, onClose }: {
         <div className="overflow-y-auto flex-1 py-2">
           {sections.length === 0 ? (
             <p className="text-center py-8 text-xs" style={{ color: 'var(--text-muted)' }}>
-              Nenhum servidor encontrado
+              No servers found
             </p>
           ) : (
             sections.map(({ label, items }) => (
@@ -287,7 +287,7 @@ function ServerPickerItem({ server, isCurrent, onSelect }: {
               className="px-1.5 rounded text-xs font-semibold flex-shrink-0"
               style={{ background: 'var(--accent-subtle)', color: 'var(--accent)', fontSize: 10 }}
             >
-              atual
+              current
             </span>
           )}
         </div>
@@ -374,7 +374,7 @@ function TabItem({
       onMouseLeave={() => setHovered(false)}
       onClick={handleClick}
       onContextMenu={onContextMenu}
-      title="Clique: ativar · Duplo clique: fechar · Botão direito: opções"
+      title="Click: activate · Double-click: close · Right-click: options"
     >
       {isActive && (
         <div
@@ -388,20 +388,35 @@ function TabItem({
           e.stopPropagation()
           if (tab.status === 'connected') onToggleSftp()
         }}
-        title={tab.mode === 'sftp' ? 'Voltar ao Terminal' : 'Abrir SFTP'}
-        className="flex items-center justify-center flex-shrink-0 rounded"
+        title={tab.mode === 'sftp' ? 'Switch to Terminal (click)' : 'Open SFTP (click)'}
+        className="flex items-center gap-1 flex-shrink-0"
         style={{
           color: tab.mode === 'sftp' ? 'var(--purple, #8b5cf6)' : 'var(--accent)',
-          background: 'transparent',
-          padding: 3,
-          cursor: tab.status === 'connected' ? 'pointer' : 'default'
+          background: tab.mode === 'sftp' ? 'rgba(139,92,246,0.12)' : 'rgba(var(--accent-rgb, 59,130,246),0.10)',
+          border: `1px solid ${tab.mode === 'sftp' ? 'rgba(139,92,246,0.45)' : 'rgba(var(--accent-rgb,59,130,246),0.40)'}`,
+          borderRadius: 5,
+          padding: '2px 6px',
+          fontSize: 10,
+          fontWeight: 700,
+          fontFamily: 'monospace',
+          opacity: tab.status === 'connected' ? 1 : 0.35,
+          cursor: tab.status === 'connected' ? 'pointer' : 'default',
+          transition: 'opacity 0.15s, background 0.15s',
+          letterSpacing: '0.02em'
         }}
         onMouseEnter={(e) => {
-          if (tab.status === 'connected') e.currentTarget.style.background = 'var(--bg-active)'
+          if (tab.status === 'connected') {
+            e.currentTarget.style.opacity = '0.8'
+            e.currentTarget.style.filter = 'brightness(1.2)'
+          }
         }}
-        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.opacity = tab.status === 'connected' ? '1' : '0.35'
+          e.currentTarget.style.filter = ''
+        }}
       >
-        {tab.mode === 'sftp' ? <FolderOpen size={15} /> : <Terminal size={15} />}
+        {tab.mode === 'sftp' ? <FolderOpen size={11} /> : <Terminal size={11} />}
+        <span>{tab.mode === 'sftp' ? 'SFTP' : 'SSH'}</span>
       </button>
 
       <div
