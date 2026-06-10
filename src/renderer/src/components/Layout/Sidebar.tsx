@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Monitor, List, FileDown, Settings, Terminal } from 'lucide-react'
+import { Monitor, List, FileDown, Settings, Terminal, KeyRound } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { NavPage } from '../../types'
 
 const NAV_ITEMS: { id: NavPage; label: string; icon: React.ReactNode }[] = [
   { id: 'hosts',  label: 'Hosts',  icon: <Monitor size={15} /> },
+  { id: 'vault',  label: 'Vault',  icon: <KeyRound size={15} /> },
   { id: 'logs',   label: 'Logs',   icon: <List size={15} /> },
   { id: 'export', label: 'Export', icon: <FileDown size={15} /> },
 ]

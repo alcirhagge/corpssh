@@ -1,14 +1,51 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { safeStorage } from 'electron'
 
 const STORE_DIR = path.join(os.homedir(), '.corpssh')
 const STORE_FILE = path.join(STORE_DIR, 'data.json')
+
+// ─── Encryption at rest ──────────────────────────────────────────────────────
+// Secrets (passwords, passphrases, inline private keys) are encrypted with the
+// OS keystore via Electron safeStorage (DPAPI on Windows, Keychain on macOS,
+// libsecret on Linux). Encrypted values are stored as `enc:v1:<base64>` so we
+// can tell them apart from legacy plaintext and migrate transparently.
+const ENC_PREFIX = 'enc:v1:'
+
+function encrypt(value?: string): string | undefined {
+  if (value == null || value === '') return value
+  if (value.startsWith(ENC_PREFIX)) return value  // already encrypted
+  try {
+    if (safeStorage.isEncryptionAvailable())
+      return ENC_PREFIX + safeStorage.encryptString(value).toString('base64')
+  } catch { /* fall through to plaintext */ }
+  return value
+}
+
+function decrypt(value?: string): string | undefined {
+  if (value == null || !value.startsWith(ENC_PREFIX)) return value
+  try {
+    return safeStorage.decryptString(Buffer.from(value.slice(ENC_PREFIX.length), 'base64'))
+  } catch {
+    return value
+  }
+}
+
+const SERVER_SECRETS: (keyof ServerRecord)[] = ['password', 'passphrase', 'privateKeyContent']
+const CRED_SECRETS: (keyof CredentialRecord)[] = ['password', 'passphrase', 'privateKeyContent']
+
+function mapSecrets<T>(rec: T, keys: (keyof T)[], fn: (v?: string) => string | undefined): T {
+  const out = { ...rec }
+  for (const k of keys) (out as any)[k] = fn((rec as any)[k])
+  return out
+}
 
 interface StoreData {
   servers: ServerRecord[]
   groups: GroupRecord[]
   keys: KeyRecord[]
+  credentials: CredentialRecord[]
   settings: AppSettings
 }
 
@@ -29,6 +66,22 @@ export interface ServerRecord {
   lastConnected?: number
   notes?: string
   detectedOs?: string
+  iconOverride?: string
+  credentialId?: string
+}
+
+// A reusable, named credential (the "vault"). A server may reference one via
+// credentialId; at connect time the credential's auth fields override the
+// server's own. Secrets are encrypted at rest just like server secrets.
+export interface CredentialRecord {
+  id: string
+  name: string
+  username: string
+  authMethod: 'password' | 'privateKey' | 'agent'
+  password?: string
+  privateKeyPath?: string
+  privateKeyContent?: string
+  passphrase?: string
 }
 
 export interface GroupRecord {
@@ -69,13 +122,15 @@ function ensureStore(): StoreData {
   try {
     if (!fs.existsSync(STORE_DIR)) fs.mkdirSync(STORE_DIR, { recursive: true })
     if (!fs.existsSync(STORE_FILE)) {
-      const initial: StoreData = { servers: [], groups: [], keys: [], settings: defaultSettings }
+      const initial: StoreData = { servers: [], groups: [], keys: [], credentials: [], settings: defaultSettings }
       fs.writeFileSync(STORE_FILE, JSON.stringify(initial, null, 2))
       return initial
     }
-    return JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8')) as StoreData
+    const data = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8')) as StoreData
+    if (!data.credentials) data.credentials = []  // back-compat with older stores
+    return data
   } catch {
-    return { servers: [], groups: [], keys: [], settings: defaultSettings }
+    return { servers: [], groups: [], keys: [], credentials: [], settings: defaultSettings }
   }
 }
 
@@ -88,14 +143,15 @@ function save(data: StoreData): void {
 }
 
 export function getServers(): ServerRecord[] {
-  return ensureStore().servers
+  return ensureStore().servers.map((s) => mapSecrets(s, SERVER_SECRETS, decrypt))
 }
 
 export function saveServer(server: ServerRecord): void {
   const data = ensureStore()
-  const idx = data.servers.findIndex((s) => s.id === server.id)
-  if (idx >= 0) data.servers[idx] = server
-  else data.servers.push(server)
+  const enc = mapSecrets(server, SERVER_SECRETS, encrypt)
+  const idx = data.servers.findIndex((s) => s.id === enc.id)
+  if (idx >= 0) data.servers[idx] = enc
+  else data.servers.push(enc)
   save(data)
 }
 
@@ -158,4 +214,72 @@ export function updateLastConnected(serverId: string): void {
     server.lastConnected = Date.now()
     save(data)
   }
+}
+
+// ─── Credentials (vault) ─────────────────────────────────────────────────────
+export function getCredentials(): CredentialRecord[] {
+  return ensureStore().credentials.map((c) => mapSecrets(c, CRED_SECRETS, decrypt))
+}
+
+export function saveCredential(cred: CredentialRecord): void {
+  const data = ensureStore()
+  const enc = mapSecrets(cred, CRED_SECRETS, encrypt)
+  const idx = data.credentials.findIndex((c) => c.id === enc.id)
+  if (idx >= 0) data.credentials[idx] = enc
+  else data.credentials.push(enc)
+  save(data)
+}
+
+export function deleteCredential(id: string): void {
+  const data = ensureStore()
+  data.credentials = data.credentials.filter((c) => c.id !== id)
+  // Detach any servers that referenced it so they fall back to their own auth
+  data.servers.forEach((s) => { if (s.credentialId === id) delete s.credentialId })
+  save(data)
+}
+
+// Resolve the effective auth for a server: a referenced credential overrides
+// the server's own auth fields. Returned secrets are decrypted.
+export function resolveServerAuth(serverId: string): Partial<ServerRecord> | null {
+  const data = ensureStore()
+  const server = data.servers.find((s) => s.id === serverId)
+  if (!server) return null
+  if (!server.credentialId) return null
+  const cred = data.credentials.find((c) => c.id === server.credentialId)
+  if (!cred) return null
+  const c = mapSecrets(cred, CRED_SECRETS, decrypt)
+  return {
+    username: c.username,
+    authMethod: c.authMethod,
+    password: c.password,
+    privateKeyPath: c.privateKeyPath,
+    privateKeyContent: c.privateKeyContent,
+    passphrase: c.passphrase
+  }
+}
+
+// One-time migration: encrypt any plaintext secrets left over from older versions
+// (servers + credentials). Safe to run on every startup — it no-ops once done.
+export function migrateEncryptionAtRest(): void {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return
+    const data = ensureStore()
+    const isPlain = (v?: string) => v != null && v !== '' && !v.startsWith(ENC_PREFIX)
+    let changed = false
+
+    data.servers.forEach((s, i) => {
+      if (SERVER_SECRETS.some((k) => isPlain(s[k] as string | undefined))) {
+        data.servers[i] = mapSecrets(s, SERVER_SECRETS, encrypt)
+        changed = true
+      }
+    })
+    data.credentials.forEach((c, i) => {
+      if (CRED_SECRETS.some((k) => isPlain(c[k] as string | undefined))) {
+        data.credentials[i] = mapSecrets(c, CRED_SECRETS, encrypt)
+        changed = true
+      }
+    })
+
+    if (changed) save(data)
+  } catch { /* ignore migration failures */ }
 }

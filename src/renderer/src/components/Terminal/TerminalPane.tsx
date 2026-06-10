@@ -3,6 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { useAppStore } from '../../store/appStore'
 import type { Tab } from '../../types'
@@ -89,6 +90,17 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
     terminal.loadAddon(searchAddon)
     terminal.open(container)
 
+    // GPU-accelerated rendering. This is the single biggest perf win for the
+    // terminal — the default DOM renderer chokes on heavy output. Fall back
+    // silently to the DOM renderer if WebGL is unavailable or its context is lost.
+    try {
+      const webglAddon = new WebglAddon()
+      webglAddon.onContextLoss(() => webglAddon.dispose())
+      terminal.loadAddon(webglAddon)
+    } catch {
+      /* WebGL unavailable — DOM renderer stays active */
+    }
+
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
     searchAddonRef.current = searchAddon
@@ -141,25 +153,16 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
       }
     })
 
-    // Input → SSH + session log
-    let cmdBuffer = ''
+    // Input → SSH. Command tracking + session logging now happen in the main
+    // process (see sshManager.sendInput / createShellSession), so the renderer
+    // no longer round-trips every keystroke and every output chunk back to main.
     terminal.onData(data => {
       window.api.ssh.input(tab.sessionId!, data)
-      if (data === '\r' || data === '\n') {
-        const cmd = cmdBuffer.trim()
-        if (cmd && tab.sessionId) window.api.session.command(tab.sessionId, cmd)
-        cmdBuffer = ''
-      } else if (data === '\x7f') {
-        cmdBuffer = cmdBuffer.slice(0, -1)
-      } else if (data.charCodeAt(0) >= 32) {
-        cmdBuffer += data
-      }
     })
 
-    // SSH data → terminal + session log
+    // SSH data → terminal
     const unsubData = window.api.ssh.onData(tab.sessionId!, data => {
       terminal.write(data)
-      if (tab.sessionId) window.api.session.data(tab.sessionId, data)
     })
 
     const unsubClosed = window.api.ssh.onClosed(tab.sessionId!, () => {

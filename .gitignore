@@ -6,3 +6,10 @@ dist
 npm-debug.log*
 .env
 .env.local
+*.tsbuildinfo
+
+# local packaging artifacts (not part of the repo)
+app.asar
+app-extracted/
+asar-base/
+setup-temp/

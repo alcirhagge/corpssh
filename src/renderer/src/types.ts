@@ -22,6 +22,19 @@ export interface Server {
   lastConnected?: number
   notes?: string
   detectedOs?: string
+  iconOverride?: string
+  credentialId?: string
+}
+
+export interface Credential {
+  id: string
+  name: string
+  username: string
+  authMethod: 'password' | 'privateKey' | 'agent'
+  password?: string
+  privateKeyPath?: string
+  privateKeyContent?: string
+  passphrase?: string
 }
 
 export interface Group {
@@ -97,7 +110,7 @@ export interface RemoteLogConfig {
 }
 
 export type Theme = 'dark' | 'light'
-export type NavPage = 'hosts' | 'keys' | 'logs' | 'export' | 'terminal'
+export type NavPage = 'hosts' | 'keys' | 'logs' | 'export' | 'terminal' | 'vault'
 
 export const SERVER_COLORS = [
   '#4c74ff', '#30d48a', '#f7b731', '#ff5757',

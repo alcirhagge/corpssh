@@ -3,6 +3,7 @@ import { BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { appendSessionData, appendSessionCommand } from './sessionLogger'
 
 export interface SSHConnectionConfig {
   id: string
@@ -193,18 +194,30 @@ export function createShellSession(sessionId: string, cols: number, rows: number
       (err, stream) => {
         if (err) return reject(err)
 
-        const win = getWindow()
+        // Coalesce output and flush to the renderer on a short timer. This keeps
+        // the IPC message count low under heavy output (logs, full configs, cat)
+        // instead of firing one IPC message per chunk, which freezes the UI.
+        let outBuf = ''
+        let outTimer: NodeJS.Timeout | null = null
+        const flushOut = (): void => {
+          outTimer = null
+          if (!outBuf) return
+          getWindow()?.webContents.send(`ssh:data:${sessionId}`, outBuf)
+          outBuf = ''
+        }
+        const pushOut = (text: string): void => {
+          appendSessionData(sessionId, text)  // session log lives in main now
+          outBuf += text
+          if (!outTimer) outTimer = setTimeout(flushOut, 8)
+        }
 
-        stream.on('data', (data: Buffer) => {
-          win?.webContents.send(`ssh:data:${sessionId}`, data.toString())
-        })
-
-        stream.stderr.on('data', (data: Buffer) => {
-          win?.webContents.send(`ssh:data:${sessionId}`, data.toString())
-        })
+        stream.on('data', (data: Buffer) => pushOut(data.toString()))
+        stream.stderr.on('data', (data: Buffer) => pushOut(data.toString()))
 
         stream.on('close', () => {
-          win?.webContents.send(`ssh:closed:${sessionId}`)
+          if (outTimer) { clearTimeout(outTimer); flushOut() }
+          cmdBuffers.delete(sessionId)
+          getWindow()?.webContents.send(`ssh:closed:${sessionId}`)
           activeConnections.delete(sessionId)
         })
 
@@ -215,9 +228,28 @@ export function createShellSession(sessionId: string, cols: number, rows: number
   })
 }
 
+// Per-session typed-command buffer, used to log "CMD>" lines to the session log.
+// Tracking this in main (instead of round-tripping from the renderer) removes an
+// IPC call per keystroke.
+const cmdBuffers = new Map<string, string>()
+
 export function sendInput(sessionId: string, data: string): void {
   const conn = activeConnections.get(sessionId) as any
   if (conn?.stream) conn.stream.write(data)
+
+  let buf = cmdBuffers.get(sessionId) ?? ''
+  for (const ch of data) {
+    if (ch === '\r' || ch === '\n') {
+      const cmd = buf.trim()
+      if (cmd) appendSessionCommand(sessionId, cmd)
+      buf = ''
+    } else if (ch === '\x7f') {
+      buf = buf.slice(0, -1)
+    } else if (ch.charCodeAt(0) >= 32) {
+      buf += ch
+    }
+  }
+  cmdBuffers.set(sessionId, buf)
 }
 
 export function resizeTerminal(sessionId: string, cols: number, rows: number): void {
@@ -233,6 +265,7 @@ export function disconnectSSH(sessionId: string): void {
     conn.client.end()
     activeConnections.delete(sessionId)
   }
+  cmdBuffers.delete(sessionId)
 }
 
 export function listSFTPDirectory(sessionId: string, remotePath: string): Promise<SFTPEntry[]> {

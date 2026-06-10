@@ -48,20 +48,57 @@ function stripAnsi(str: string): string {
     .replace(/\r/g, '\n')
 }
 
-export function appendSessionData(sessionId: string, data: string): void {
+// ─── Buffered writes ───────────────────────────────────────────────────────
+// Writing to disk on every data chunk (fs.appendFileSync per chunk) blocks the
+// main process and freezes the UI under heavy output. Instead we accumulate
+// per-session text in memory and flush on a short timer. Both data and command
+// entries go through the same buffer so their ordering is preserved on disk.
+const writeBuffers = new Map<string, string>()
+let flushTimer: NodeJS.Timeout | null = null
+const FLUSH_INTERVAL = 500
+
+function scheduleFlush(): void {
+  if (flushTimer) return
+  flushTimer = setTimeout(flushAll, FLUSH_INTERVAL)
+}
+
+function flushAll(): void {
+  flushTimer = null
+  for (const [sessionId, buf] of writeBuffers) {
+    if (buf) writeToDisk(sessionId, buf)
+  }
+  writeBuffers.clear()
+}
+
+function writeToDisk(sessionId: string, text: string): void {
   const file = path.join(SESSIONS_DIR, `${sessionId}.log`)
-  if (!fs.existsSync(file)) return
-  fs.appendFileSync(file, stripAnsi(data), 'utf-8')
+  try {
+    if (fs.existsSync(file)) fs.appendFileSync(file, text, 'utf-8')
+  } catch { /* ignore log write failures */ }
+}
+
+// Flush a single session synchronously — used before closing/reading its log.
+export function flushSession(sessionId: string): void {
+  const buf = writeBuffers.get(sessionId)
+  if (buf) {
+    writeBuffers.delete(sessionId)
+    writeToDisk(sessionId, buf)
+  }
+}
+
+export function appendSessionData(sessionId: string, data: string): void {
+  writeBuffers.set(sessionId, (writeBuffers.get(sessionId) ?? '') + stripAnsi(data))
+  scheduleFlush()
 }
 
 export function appendSessionCommand(sessionId: string, command: string): void {
-  const file = path.join(SESSIONS_DIR, `${sessionId}.log`)
-  if (!fs.existsSync(file)) return
   const ts = new Date().toISOString().substring(11, 19)
-  fs.appendFileSync(file, `\n[${ts}] CMD> ${command}\n`, 'utf-8')
+  writeBuffers.set(sessionId, (writeBuffers.get(sessionId) ?? '') + `\n[${ts}] CMD> ${command}\n`)
+  scheduleFlush()
 }
 
 export function closeSessionLog(sessionId: string, endedAt: number): void {
+  flushSession(sessionId)
   const metaFile = path.join(SESSIONS_DIR, `${sessionId}.json`)
   if (fs.existsSync(metaFile)) {
     const meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8')) as SessionMeta
@@ -88,6 +125,7 @@ export function listSessions(): SessionMeta[] {
 }
 
 export function readSessionLog(sessionId: string): string {
+  flushSession(sessionId)
   const file = path.join(SESSIONS_DIR, `${sessionId}.log`)
   if (!fs.existsSync(file)) return ''
   return fs.readFileSync(file, 'utf-8')

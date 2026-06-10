@@ -10,6 +10,7 @@ import HostDashboard from './components/Dashboard/HostDashboard'
 import HostForm from './components/Dashboard/HostForm'
 import LogsPanel from './components/Logs/LogsPanel'
 import ExportPanel from './components/Export/ExportPanel'
+import CredentialsPanel from './components/Vault/CredentialsPanel'
 import SettingsPanel from './components/Dialogs/SettingsPanel'
 import UpdateNotification from './components/Layout/UpdateNotification'
 import type { Server, Tab, LogEntry } from './types'
@@ -17,7 +18,7 @@ import { applyTheme, getThemeBase } from './themes'
 
 export default function App() {
   const {
-    setServers, setGroups, setKeys, setSettings,
+    setServers, setGroups, setKeys, setCredentials, setSettings,
     addTab, updateTab, removeTab, setActiveTab, setActivePage,
     upsertServer, theme, setTheme, addLog,
     servers, tabs, activeTabId, activePage, rightPanel
@@ -26,15 +27,17 @@ export default function App() {
   // Load data + apply theme
   useEffect(() => {
     const load = async () => {
-      const [serverList, groupList, keyList, settingsData] = await Promise.all([
+      const [serverList, groupList, keyList, credList, settingsData] = await Promise.all([
         window.api.servers.list(),
         window.api.groups.list(),
         window.api.keys.list(),
+        window.api.credentials.list(),
         window.api.settings.get()
       ])
       setServers(serverList)
       setGroups(groupList.slice().sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999)))
       setKeys(keyList)
+      setCredentials(credList)
       setSettings(settingsData)
       const themeId = settingsData.themeId ?? 'navy'
       const base = getThemeBase(themeId)
@@ -77,7 +80,8 @@ export default function App() {
         password: server.password,
         privateKeyPath: server.privateKeyPath,
         privateKeyContent: server.privateKeyContent,
-        passphrase: server.passphrase
+        passphrase: server.passphrase,
+        credentialId: server.credentialId  // main overlays the vault credential's auth
       })
       updateTab(tabId, { sessionId, status: 'connected', connectedAt: Date.now() })
     } catch (e: any) {
@@ -93,7 +97,8 @@ export default function App() {
         id: server.id, name: server.name,
         host: server.host, port: server.port,
         username: server.username, password: server.password,
-        domain: server.rdpDomain, fullscreen: server.rdpFullscreen
+        domain: server.rdpDomain, fullscreen: server.rdpFullscreen,
+        credentialId: server.credentialId
       })
       if (!result.ok) alert(`RDP: ${result.message}`)
       return
@@ -143,6 +148,7 @@ export default function App() {
   const showHosts = activePage === 'hosts'
   const showLogs = activePage === 'logs'
   const showExport = activePage === 'export'
+  const showVault = activePage === 'vault'
   const showSettings = activePage === 'keys'
   const showRightPanel = rightPanel !== null && showHosts
 
@@ -250,6 +256,7 @@ export default function App() {
 
             {showLogs && <LogsPanel />}
             {showExport && <ExportPanel />}
+            {showVault && <CredentialsPanel />}
             {showSettings && <SettingsPanel onClose={() => setActivePage('hosts')} />}
           </div>
         </div>

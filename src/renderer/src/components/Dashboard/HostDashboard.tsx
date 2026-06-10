@@ -101,7 +101,7 @@ function siIcon(si: SiIcon): OsIconFn {
   return ({ s = 20 }) => <Si icon={si} s={s} />
 }
 
-const OS_MAP: Record<string, { color: string; Icon: OsIconFn }> = {
+export const OS_MAP: Record<string, { color: string; Icon: OsIconFn }> = {
   // Linux distros
   ubuntu:       { color: '#E95420', Icon: siIcon(siUbuntu) },
   debian:       { color: '#A81D33', Icon: siIcon(siDebian) },
@@ -130,12 +130,39 @@ const OS_MAP: Record<string, { color: string; Icon: OsIconFn }> = {
   vnc:          { color: '#6B46C1', Icon: VncSvg },
 }
 
+// Curated, user-pickable icons (manual override). Order = display order in the picker.
+export const ICON_CHOICES: { key: string; label: string }[] = [
+  { key: 'huawei', label: 'Huawei' },
+  { key: 'mikrotik', label: 'MikroTik' },
+  { key: 'cisco', label: 'Cisco' },
+  { key: 'juniper', label: 'Juniper' },
+  { key: 'fortinet', label: 'Fortinet' },
+  { key: 'pfsense', label: 'pfSense' },
+  { key: 'olt', label: 'OLT / Fiber' },
+  { key: 'ubuntu', label: 'Ubuntu' },
+  { key: 'debian', label: 'Debian' },
+  { key: 'centos', label: 'CentOS' },
+  { key: 'fedora', label: 'Fedora' },
+  { key: 'rhel', label: 'Red Hat' },
+  { key: 'arch', label: 'Arch' },
+  { key: 'alpine', label: 'Alpine' },
+  { key: 'suse', label: 'SUSE' },
+  { key: 'freebsd', label: 'FreeBSD' },
+  { key: 'linux', label: 'Linux' },
+  { key: 'raspberrypi', label: 'Raspberry Pi' },
+  { key: 'espressif', label: 'ESP / IoT' },
+  { key: 'windows', label: 'Windows' },
+]
+
 // Detection: returns brand color + icon component for a server
 // groupName: name of the group this server belongs to (used as extra hint)
-function getOsInfo(
-  server: { name: string; host: string; protocol?: string; detectedOs?: string },
+export function getOsInfo(
+  server: { name: string; host: string; protocol?: string; detectedOs?: string; iconOverride?: string },
   groupName?: string
 ): { color: string; Icon: OsIconFn } {
+  // Manual override always wins — also fixes legacy devices that auto-detect wrong
+  if (server.iconOverride && OS_MAP[server.iconOverride]) return OS_MAP[server.iconOverride]
+
   const proto = server.protocol ?? 'ssh'
 
   if (proto === 'vnc') return OS_MAP.vnc

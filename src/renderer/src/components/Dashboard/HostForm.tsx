@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Eye, EyeOff, Folder } from 'lucide-react'
+import { X, Eye, EyeOff, Folder, Sparkles } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Server } from '../../types'
 import { HOST_ICON_COLORS } from '../../types'
+import { OS_MAP, ICON_CHOICES, getOsInfo } from './HostDashboard'
 
 function getInitials(name: string): string {
   return name.split(/[\s\-_]+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || 'H'
@@ -15,7 +16,7 @@ function getIconColor(server: Partial<Server>): string {
 }
 
 export default function HostForm({ onConnect }: { onConnect: (server: Server) => void }) {
-  const { rightPanel, setRightPanel, groups, upsertServer } = useAppStore()
+  const { rightPanel, setRightPanel, groups, credentials, upsertServer } = useAppStore()
   const isEdit = rightPanel?.mode === 'edit'
   const editServer = isEdit ? (rightPanel as any).server as Server : null
   const defaultGroupId = rightPanel?.mode === 'new' ? (rightPanel as any).groupId : undefined
@@ -87,7 +88,8 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
 
   const validate = () => {
     if (!form.host?.trim()) return 'Host required'
-    if (form.protocol !== 'vnc' && !form.username?.trim()) return 'Username required'
+    // A vault credential supplies the username, so the inline field can be empty
+    if (form.protocol !== 'vnc' && !form.credentialId && !form.username?.trim()) return 'Username required'
     return ''
   }
 
@@ -199,6 +201,55 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
           </div>
         </FormSection>
 
+        {/* Icon override — useful for network gear where OS auto-detection can't run */}
+        <FormSection label="Icon">
+          <div className="flex flex-wrap gap-1.5">
+            {(() => {
+              const groupName = groups.find((g) => g.id === form.groupId)?.name
+              const auto = getOsInfo({ ...(form as any), iconOverride: undefined }, groupName)
+              const AutoIcon = auto.Icon
+              const isAuto = !form.iconOverride
+              return (
+                <button
+                  onClick={() => set('iconOverride', undefined)}
+                  title="Auto-detect"
+                  className="relative flex items-center justify-center rounded-lg"
+                  style={{
+                    width: 30, height: 30, background: `linear-gradient(135deg, ${auto.color}, ${auto.color}bb)`,
+                    outline: isAuto ? '2px solid var(--accent)' : '2px solid transparent', outlineOffset: 1
+                  }}
+                >
+                  <AutoIcon s={16} />
+                  <span className="absolute -bottom-1 -right-1 rounded-full flex items-center justify-center"
+                    style={{ width: 13, height: 13, background: 'var(--accent)', color: '#fff' }}>
+                    <Sparkles size={8} />
+                  </span>
+                </button>
+              )
+            })()}
+            {ICON_CHOICES.map(({ key, label }) => {
+              const info = OS_MAP[key]
+              if (!info) return null
+              const Icon = info.Icon
+              const selected = form.iconOverride === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => set('iconOverride', key)}
+                  title={label}
+                  className="flex items-center justify-center rounded-lg"
+                  style={{
+                    width: 30, height: 30, background: `linear-gradient(135deg, ${info.color}, ${info.color}bb)`,
+                    outline: selected ? '2px solid var(--accent)' : '2px solid transparent', outlineOffset: 1
+                  }}
+                >
+                  <Icon s={16} />
+                </button>
+              )
+            })}
+          </div>
+        </FormSection>
+
         {/* Address + Port */}
         <FormSection label="Address">
           <div className="flex gap-2">
@@ -222,6 +273,30 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
         {/* SSH section */}
         {form.protocol === 'ssh' && (
           <FormSection label="SSH">
+            {/* Credential source: a saved vault credential overrides the inline fields */}
+            <select
+              value={form.credentialId ?? ''}
+              onChange={(e) => set('credentialId', e.target.value || undefined)}
+              className="mb-2"
+            >
+              <option value="">This host (custom credentials)</option>
+              {credentials.map((c) => (
+                <option key={c.id} value={c.id}>🔑 {c.name} ({c.username})</option>
+              ))}
+            </select>
+
+            {form.credentialId ? (
+              <div
+                className="px-3 py-2 rounded text-xs mb-1"
+                style={{ background: 'var(--accent-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              >
+                Using saved credential
+                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                  {' '}{credentials.find((c) => c.id === form.credentialId)?.name ?? '—'}
+                </span>. Manage it in the Vault.
+              </div>
+            ) : (
+            <>
             <input
               value={form.username ?? ''}
               onChange={(e) => set('username', e.target.value)}
@@ -294,6 +369,8 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
                   </button>
                 </div>
               </div>
+            )}
+            </>
             )}
           </FormSection>
         )}

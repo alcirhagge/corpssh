@@ -35,6 +35,13 @@ const api = {
     delete: (id: string) => ipcRenderer.invoke('keys:delete', id)
   },
 
+  // Credential vault
+  credentials: {
+    list: () => ipcRenderer.invoke('credentials:list'),
+    save: (cred: unknown) => ipcRenderer.invoke('credentials:save', cred),
+    delete: (id: string) => ipcRenderer.invoke('credentials:delete', id)
+  },
+
   // Settings
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
@@ -46,7 +53,7 @@ const api = {
     connect: (config: unknown) => ipcRenderer.invoke('ssh:connect', config),
     shell: (sessionId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('ssh:shell', sessionId, cols, rows),
-    input: (sessionId: string, data: string) => ipcRenderer.invoke('ssh:input', sessionId, data),
+    input: (sessionId: string, data: string) => ipcRenderer.send('ssh:input', sessionId, data),
     resize: (sessionId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('ssh:resize', sessionId, cols, rows),
     disconnect: (sessionId: string) => ipcRenderer.invoke('ssh:disconnect', sessionId),
@@ -106,10 +113,8 @@ const api = {
     disconnect: (sessionId: string) => ipcRenderer.invoke('vnc:disconnect', sessionId)
   },
 
-  // Session logs
+  // Session logs (capture happens in the main process now; renderer only reads)
   session: {
-    data: (sessionId: string, data: string) => ipcRenderer.invoke('session:data', sessionId, data),
-    command: (sessionId: string, cmd: string) => ipcRenderer.invoke('session:command', sessionId, cmd),
     list: () => ipcRenderer.invoke('session:list'),
     read: (sessionId: string) => ipcRenderer.invoke('session:read', sessionId),
     delete: (sessionId: string) => ipcRenderer.invoke('session:delete', sessionId)

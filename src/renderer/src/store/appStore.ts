@@ -1,10 +1,11 @@
 import { create } from 'zustand'
-import type { Server, Group, SSHKey, Tab, AppSettings, Theme, NavPage, LogEntry } from '../types'
+import type { Server, Group, SSHKey, Credential, Tab, AppSettings, Theme, NavPage, LogEntry } from '../types'
 
 interface AppState {
   servers: Server[]
   groups: Group[]
   keys: SSHKey[]
+  credentials: Credential[]
   settings: AppSettings
   tabs: Tab[]
   activeTabId: string | null
@@ -17,6 +18,7 @@ interface AppState {
   setServers: (s: Server[]) => void
   setGroups: (g: Group[]) => void
   setKeys: (k: SSHKey[]) => void
+  setCredentials: (c: Credential[]) => void
   setSettings: (s: AppSettings) => void
   setTheme: (t: Theme) => void
   setActivePage: (p: NavPage) => void
@@ -33,6 +35,9 @@ interface AppState {
   removeGroup: (id: string) => void
   upsertKey: (k: SSHKey) => void
   removeKey: (id: string) => void
+
+  upsertCredential: (c: Credential) => void
+  removeCredential: (id: string) => void
 
   addLog: (e: LogEntry) => void
   setLogs: (e: LogEntry[]) => void
@@ -57,6 +62,7 @@ export const useAppStore = create<AppState>((set) => ({
   servers: [],
   groups: [],
   keys: [],
+  credentials: [],
   settings: defaultSettings,
   tabs: [],
   activeTabId: null,
@@ -69,6 +75,7 @@ export const useAppStore = create<AppState>((set) => ({
   setServers: (servers) => set({ servers }),
   setGroups: (groups) => set({ groups }),
   setKeys: (keys) => set({ keys }),
+  setCredentials: (credentials) => set({ credentials }),
   setSettings: (settings) => set({ settings }),
   setTheme: (theme) => set({ theme }),
   setActivePage: (activePage) => set({ activePage }),
@@ -111,6 +118,20 @@ export const useAppStore = create<AppState>((set) => ({
           : [...s.keys, key]
     })),
   removeKey: (id) => set((s) => ({ keys: s.keys.filter((x) => x.id !== id) })),
+
+  upsertCredential: (cred) =>
+    set((s) => ({
+      credentials:
+        s.credentials.find((x) => x.id === cred.id)
+          ? s.credentials.map((x) => (x.id === cred.id ? cred : x))
+          : [...s.credentials, cred]
+    })),
+  removeCredential: (id) =>
+    set((s) => ({
+      credentials: s.credentials.filter((x) => x.id !== id),
+      // mirror the main-process detach so referencing hosts fall back to own auth
+      servers: s.servers.map((x) => (x.credentialId === id ? { ...x, credentialId: undefined } : x))
+    })),
 
   addLog: (entry) => set((s) => ({ logs: [entry, ...s.logs].slice(0, 1000) })),
   setLogs: (logs) => set({ logs }),
