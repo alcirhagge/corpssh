@@ -25,6 +25,14 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [isDisconnected, setIsDisconnected] = useState(false)
+  const [copyNotice, setCopyNotice] = useState<{ chars: number; key: number } | null>(null)
+
+  // Auto-dismiss the "copied N chars" toast
+  useEffect(() => {
+    if (!copyNotice) return
+    const t = setTimeout(() => setCopyNotice(null), 1400)
+    return () => clearTimeout(t)
+  }, [copyNotice])
 
   const getTheme = useCallback(() => {
     const s = getComputedStyle(document.documentElement)
@@ -103,6 +111,16 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
       return true
     })
 
+    // Copy-on-select: when a mouse selection completes, copy it and flash a toast
+    const onMouseUp = () => {
+      if (!terminal.hasSelection()) return
+      const sel = terminal.getSelection()
+      if (!sel) return
+      navigator.clipboard.writeText(sel).catch(() => {})
+      setCopyNotice({ chars: sel.length, key: Date.now() })
+    }
+    container.addEventListener('mouseup', onMouseUp)
+
     // Single paste handler (capture phase = intercepts before xterm's own handler)
     const onPaste = (e: ClipboardEvent) => {
       e.preventDefault()
@@ -178,6 +196,7 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
       unsubClosed()
       resizeObserver.disconnect()
       container.removeEventListener('paste', onPaste, true)
+      container.removeEventListener('mouseup', onMouseUp)
       terminal.dispose()
       terminalRef.current = null
     }
@@ -233,6 +252,19 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {copyNotice && (
+        <div
+          key={copyNotice.key}
+          className="absolute z-30 px-2.5 py-1 rounded-md text-xs font-medium pointer-events-none"
+          style={{
+            top: showSearch ? 46 : 8, right: 8,
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+            color: 'var(--text-secondary)', boxShadow: '0 4px 12px rgba(0,0,0,0.25)'
+          }}
+        >
+          copied {copyNotice.chars} {copyNotice.chars === 1 ? 'char' : 'chars'} to clipboard
         </div>
       )}
       {showSearch && (

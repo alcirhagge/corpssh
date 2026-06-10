@@ -77,6 +77,7 @@ const api = {
     delete: (sessionId: string, remotePath: string, isDir: boolean) =>
       ipcRenderer.invoke('sftp:delete', sessionId, remotePath, isDir),
     reveal: (localPath: string) => ipcRenderer.invoke('sftp:reveal', localPath),
+    home: (sessionId: string): Promise<string> => ipcRenderer.invoke('sftp:home', sessionId),
     uploadDirect: (sessionId: string, localPath: string, remotePath: string) =>
       ipcRenderer.invoke('sftp:uploadDirect', sessionId, localPath, remotePath),
     downloadDirect: (sessionId: string, remotePath: string, localPath: string) =>

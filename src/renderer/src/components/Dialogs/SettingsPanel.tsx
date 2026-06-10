@@ -4,6 +4,8 @@ import { useAppStore } from '../../store/appStore'
 import { THEMES, applyTheme, getThemeBase } from '../../themes'
 import type { AppSettings } from '../../types'
 
+declare const __APP_VERSION__: string
+
 interface SettingsPanelProps {
   onClose: () => void
 }
@@ -268,8 +270,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </div>
                 <div className="text-center">
                   <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>CorpSSH</h3>
-                  <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--accent)' }}>v1.6.0</p>
-                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>NBN Telecom — Network Operations</p>
+                  <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--accent)' }}>v{__APP_VERSION__}</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Corporate SSH Client</p>
                 </div>
                 <div
                   className="w-full rounded-xl p-4 grid gap-2"

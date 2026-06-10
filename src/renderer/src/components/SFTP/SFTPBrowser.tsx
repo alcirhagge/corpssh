@@ -95,14 +95,20 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
   }, [])
 
   useEffect(() => {
-    loadRemote('/')
+    // Open the server pane at the user's home dir (writable) instead of '/'
+    if (tab.sessionId) {
+      window.api.sftp.home(tab.sessionId)
+        .then((h) => loadRemote(h || '/'))
+        .catch(() => loadRemote('/'))
+    }
     window.api.local.homedir().then((home) => loadLocal(home))
-  }, [loadRemote, loadLocal])
+  }, [loadRemote, loadLocal, tab.sessionId])
 
   const handleUpload = async () => {
-    if (!selectedLocal || selectedLocal.type !== 'file' || !tab.sessionId) return
+    if (!selectedLocal || !tab.sessionId) return
+    const isDir = selectedLocal.type === 'directory'
     setTransferring(true)
-    setTransferMsg(`Uploading ${selectedLocal.name}…`)
+    setTransferMsg(`Uploading ${isDir ? 'folder ' : ''}${selectedLocal.name}…`)
     setError(null)
     try {
       const src = joinPath(localPath, selectedLocal.name)
@@ -119,9 +125,10 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
   }
 
   const handleDownload = async () => {
-    if (!selectedRemote || selectedRemote.type !== 'file' || !tab.sessionId) return
+    if (!selectedRemote || !tab.sessionId) return
+    const isDir = selectedRemote.type === 'directory'
     setTransferring(true)
-    setTransferMsg(`Downloading ${selectedRemote.name}…`)
+    setTransferMsg(`Downloading ${isDir ? 'folder ' : ''}${selectedRemote.name}…`)
     setError(null)
     try {
       const src = joinPath(remotePath, selectedRemote.name)
@@ -137,8 +144,8 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
     }
   }
 
-  const uploadReady = !!selectedLocal && selectedLocal.type === 'file' && !transferring
-  const downloadReady = !!selectedRemote && selectedRemote.type === 'file' && !transferring
+  const uploadReady = !!selectedLocal && !transferring
+  const downloadReady = !!selectedRemote && !transferring
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--bg-app)' }}>
@@ -200,7 +207,7 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
           <button
             onClick={handleUpload}
             disabled={!uploadReady}
-            title="Upload to server →"
+            title="Upload file/folder to server →"
             className="flex items-center justify-center rounded-lg"
             style={{
               width: 34, height: 34,
@@ -216,7 +223,7 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
           <button
             onClick={handleDownload}
             disabled={!downloadReady}
-            title="← Download from server"
+            title="← Download file/folder from server"
             className="flex items-center justify-center rounded-lg"
             style={{
               width: 34, height: 34,
@@ -338,13 +345,11 @@ function FilePane({
                   borderLeft: `2px solid ${isSelected ? 'var(--accent)' : 'transparent'}`,
                   transition: 'background 0.08s'
                 }}
-                onClick={() => {
-                  if (isDir) {
-                    onNavigate(joinPath(currentPath, entry.name))
-                  } else {
-                    onSelect(entry)
-                  }
+                onClick={() => onSelect(entry)}
+                onDoubleClick={() => {
+                  if (isDir) onNavigate(joinPath(currentPath, entry.name))
                 }}
+                title={isDir ? 'Click to select · double-click to open' : entry.name}
                 onMouseEnter={(e) => {
                   if (!isSelected) e.currentTarget.style.background = 'var(--bg-hover)'
                 }}

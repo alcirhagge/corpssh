@@ -20,6 +20,9 @@ import {
   listSFTPDirectory,
   downloadFile,
   uploadFile,
+  uploadPath,
+  downloadPath,
+  getRemoteHome,
   deleteSFTPItem,
   detectRemoteOs,
   detectOsFromSession
@@ -391,13 +394,16 @@ export function setupIpcHandlers(): void {
     })
   })
 
-  // Direct transfers without dialogs (used by split-pane SFTP)
+  // Resolve the remote home directory so the split-pane SFTP opens somewhere writable
+  ipcMain.handle('sftp:home', (_e, sessionId: string) => getRemoteHome(sessionId))
+
+  // Direct transfers without dialogs (used by split-pane SFTP) — handle files AND folders
   ipcMain.handle('sftp:uploadDirect', async (_e, sessionId: string, localPath: string, remotePath: string) => {
-    await uploadFile(sessionId, localPath, remotePath)
+    await uploadPath(sessionId, localPath, remotePath)
     return true
   })
   ipcMain.handle('sftp:downloadDirect', async (_e, sessionId: string, remotePath: string, localPath: string) => {
-    await downloadFile(sessionId, remotePath, localPath)
+    await downloadPath(sessionId, remotePath, localPath)
     return localPath
   })
 }

@@ -1,4 +1,4 @@
-import { Client, ConnectConfig } from 'ssh2'
+import { Client, ConnectConfig, SFTPWrapper } from 'ssh2'
 import { BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -30,6 +30,7 @@ interface ActiveConnection {
   client: Client
   sessionId: string
   config: SSHConnectionConfig
+  remoteIdent?: string
 }
 
 const activeConnections = new Map<string, ActiveConnection>()
@@ -37,6 +38,22 @@ const activeConnections = new Map<string, ActiveConnection>()
 function getWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
   return wins.length > 0 ? wins[0] : null
+}
+
+// ─── SSH protocol diagnostics ──────────────────────────────────────────────
+// Set CORPSSH_SSH_DEBUG=1 to dump full ssh2 protocol traces to a log file.
+// Useful to diagnose legacy-device handshake issues (ECONNRESET / signature
+// verification / no matching kex) and compare against native `ssh -vv`.
+const SSH_DEBUG = process.env.CORPSSH_SSH_DEBUG === '1'
+const SSH_DEBUG_LOG = path.join(os.homedir(), 'corpssh-ssh-debug.log')
+
+function dbg(line: string): void {
+  if (!SSH_DEBUG) return
+  try {
+    fs.appendFileSync(SSH_DEBUG_LOG, `[${new Date().toISOString()}] ${line}\n`)
+  } catch {
+    /* ignore log write failures */
+  }
 }
 
 export function createSSHConnection(
@@ -62,18 +79,24 @@ export function createSSHConnection(
           'ecdh-sha2-nistp384',
           'ecdh-sha2-nistp521',
           'diffie-hellman-group-exchange-sha256',
+          'diffie-hellman-group16-sha512',
+          'diffie-hellman-group15-sha512',
           'diffie-hellman-group14-sha256',
           'diffie-hellman-group14-sha1',
           'diffie-hellman-group-exchange-sha1',
           'diffie-hellman-group1-sha1'
         ],
+        // RSA first: some legacy switches (e.g. older Huawei VRP) offer a broken
+        // ECDSA host key that fails signature verification in ssh2. Preferring
+        // RSA/Ed25519 avoids that while keeping ECDSA available as a fallback.
         serverHostKey: [
-          'ecdsa-sha2-nistp256',
-          'ecdsa-sha2-nistp384',
-          'ecdsa-sha2-nistp521',
           'rsa-sha2-512',
           'rsa-sha2-256',
           'ssh-rsa',
+          'ssh-ed25519',
+          'ecdsa-sha2-nistp256',
+          'ecdsa-sha2-nistp384',
+          'ecdsa-sha2-nistp521',
           'ssh-dss'
         ],
         cipher: [
@@ -97,6 +120,23 @@ export function createSSHConnection(
         ]
       }
     }
+
+    let remoteIdent = ''
+    dbg(`=== CONNECT START host=${config.host}:${config.port} user=${config.username} auth=${config.authMethod} ===`)
+    // Always capture the remote SSH ident string (cheap) — used to classify the
+    // device safely without opening probe channels. Full trace only when debugging.
+    connectConfig.debug = (m: string) => {
+      const im = /Remote ident:\s*'([^']*)'/i.exec(m)
+      if (im) remoteIdent = im[1].trim()
+      if (SSH_DEBUG) dbg(`[${config.host}] ${m}`)
+    }
+
+    client.on('handshake', (n) => {
+      dbg(`[${config.host}] HANDSHAKE OK negotiated=${JSON.stringify(n)}`)
+    })
+    client.on('banner', (msg) => {
+      dbg(`[${config.host}] BANNER: ${msg?.slice(0, 500)}`)
+    })
 
     if (config.authMethod === 'password' && config.password) {
       connectConfig.password = config.password
@@ -122,11 +162,12 @@ export function createSSHConnection(
     })
 
     client.on('ready', () => {
-      activeConnections.set(sessionId, { client, sessionId, config })
+      activeConnections.set(sessionId, { client, sessionId, config, remoteIdent })
       resolve()
     })
 
-    client.on('error', (err) => {
+    client.on('error', (err: any) => {
+      dbg(`[${config.host}] ERROR code=${err?.code ?? '?'} level=${err?.level ?? '?'} msg=${err?.message ?? err}`)
       activeConnections.delete(sessionId)
       reject(err)
     })
@@ -272,6 +313,93 @@ export function uploadFile(
   })
 }
 
+// Resolve the SSH user's home directory (absolute path of '.') so the SFTP
+// browser can open somewhere writable instead of '/', where uploads are denied.
+export function getRemoteHome(sessionId: string): Promise<string> {
+  return new Promise((resolve) => {
+    const conn = activeConnections.get(sessionId)
+    if (!conn) return resolve('/')
+    conn.client.sftp((err, sftp) => {
+      if (err) return resolve('/')
+      sftp.realpath('.', (err2, absPath) => {
+        sftp.end()
+        resolve(err2 || !absPath ? '/' : absPath)
+      })
+    })
+  })
+}
+
+// ─── Recursive (folder-capable) transfers ─────────────────────────────────────
+
+function openSftp(sessionId: string): Promise<SFTPWrapper> {
+  return new Promise((resolve, reject) => {
+    const conn = activeConnections.get(sessionId)
+    if (!conn) return reject(new Error('Connection not found'))
+    conn.client.sftp((err, sftp) => (err ? reject(err) : resolve(sftp)))
+  })
+}
+
+function sftpMkdir(sftp: SFTPWrapper, dir: string): Promise<void> {
+  // Ignore "already exists" so re-uploading into an existing tree is fine.
+  return new Promise((resolve) => sftp.mkdir(dir, () => resolve()))
+}
+
+function sftpStat(sftp: SFTPWrapper, p: string): Promise<{ isDir: boolean }> {
+  return new Promise((resolve, reject) => {
+    sftp.stat(p, (err, attrs) => (err ? reject(err) : resolve({ isDir: attrs.isDirectory() })))
+  })
+}
+
+function sftpReaddir(sftp: SFTPWrapper, dir: string): Promise<{ name: string; isDir: boolean }[]> {
+  return new Promise((resolve, reject) => {
+    sftp.readdir(dir, (err, list) =>
+      err ? reject(err) : resolve(list.map((i) => ({ name: i.filename, isDir: i.attrs.isDirectory() })))
+    )
+  })
+}
+
+async function uploadRecursive(sftp: SFTPWrapper, localPath: string, remotePath: string): Promise<void> {
+  if (fs.statSync(localPath).isDirectory()) {
+    await sftpMkdir(sftp, remotePath)
+    for (const name of fs.readdirSync(localPath)) {
+      await uploadRecursive(sftp, path.join(localPath, name), `${remotePath}/${name}`)
+    }
+  } else {
+    await new Promise<void>((res, rej) => sftp.fastPut(localPath, remotePath, (e) => (e ? rej(e) : res())))
+  }
+}
+
+async function downloadRecursive(sftp: SFTPWrapper, remotePath: string, localPath: string): Promise<void> {
+  if ((await sftpStat(sftp, remotePath)).isDir) {
+    fs.mkdirSync(localPath, { recursive: true })
+    for (const entry of await sftpReaddir(sftp, remotePath)) {
+      await downloadRecursive(sftp, `${remotePath}/${entry.name}`, path.join(localPath, entry.name))
+    }
+  } else {
+    await new Promise<void>((res, rej) => sftp.fastGet(remotePath, localPath, (e) => (e ? rej(e) : res())))
+  }
+}
+
+// Public: upload a file OR a directory tree (used by the split-pane SFTP browser).
+export async function uploadPath(sessionId: string, localPath: string, remotePath: string): Promise<void> {
+  const sftp = await openSftp(sessionId)
+  try {
+    await uploadRecursive(sftp, localPath, remotePath)
+  } finally {
+    sftp.end()
+  }
+}
+
+// Public: download a file OR a directory tree.
+export async function downloadPath(sessionId: string, remotePath: string, localPath: string): Promise<void> {
+  const sftp = await openSftp(sessionId)
+  try {
+    await downloadRecursive(sftp, remotePath, localPath)
+  } finally {
+    sftp.end()
+  }
+}
+
 export function deleteSFTPItem(sessionId: string, remotePath: string, isDir: boolean): Promise<void> {
   return new Promise((resolve, reject) => {
     const conn = activeConnections.get(sessionId)
@@ -329,8 +457,45 @@ function execCapture(client: Client, cmd: string, ms = 5000): Promise<{ out: str
   })
 }
 
-// Full 2-phase detection using any already-authenticated Client
-async function detectOsWithClient(client: Client): Promise<string> {
+// Classify a device purely from its SSH identification string — no channels
+// opened, so it is safe for appliances that allow only one session.
+function classifyByIdent(ident: string): string | null {
+  const i = ident.toLowerCase()
+  if (!i) return null
+  if (i.includes('mikrotik') || i.includes('routeros')) return 'mikrotik'
+  if (i.includes('huawei') || i.includes('vrp')) return 'huawei'
+  if (i.includes('cisco')) return 'cisco'
+  if (i.includes('comware') || i.includes('h3c') || i.includes('hpe')) return 'huawei'
+  if (i.includes('juniper') || i.includes('junos')) return 'juniper'
+  if (i.includes('fortinet') || i.includes('fortissh')) return 'fortinet'
+  if (i.includes('routerboard')) return 'mikrotik'
+  return null
+}
+
+// True only for real Unix/Linux SSH daemons, which tolerate multiple/exec
+// channels. Network appliances (Huawei VRP, Cisco, OLTs) usually do NOT — they
+// allow a single VTY session and drop/reset the connection if we open `exec`
+// channels alongside the interactive shell.
+function isUnixSshServer(ident: string): boolean {
+  const i = ident.toLowerCase()
+  return i.includes('openssh') || i.includes('dropbear') || i.includes('libssh')
+    || i.includes('sun_ssh') || i.includes('mod_sftp') || i.includes('paramiko')
+}
+
+// Full 2-phase detection using any already-authenticated Client.
+// `remoteIdent` is the server's SSH banner (e.g. "SSH-2.0-OpenSSH_9.6"); it gates
+// whether we are allowed to open exec probe channels at all.
+async function detectOsWithClient(client: Client, remoteIdent = ''): Promise<string> {
+  // ── Safe path: classify network gear by its SSH ident, WITHOUT opening channels ──
+  const byIdent = classifyByIdent(remoteIdent)
+  if (byIdent) return byIdent
+
+  // Only OpenSSH/Dropbear-class servers are safe to probe with exec channels.
+  // Anything else (incl. opaque idents like Huawei VRP's "SSH-2.0--") is treated
+  // as a single-session appliance: do NOT open exec channels — that is what was
+  // resetting/dropping switch sessions. Bail without disturbing the shell.
+  if (remoteIdent && !isUnixSshServer(remoteIdent)) return 'unknown'
+
   // ── Phase 1: Linux probe ──────────────────────────────────────────────────
   const { out, err } = await execCapture(client, OS_DETECT_CMD, 8000)
 
@@ -481,7 +646,7 @@ function parseOsId(output: string): string {
 export function detectOsFromSession(sessionId: string): Promise<string> {
   const conn = activeConnections.get(sessionId)
   if (!conn) return Promise.resolve('unknown')
-  return detectOsWithClient(conn.client).catch(() => 'unknown')
+  return detectOsWithClient(conn.client, conn.remoteIdent ?? '').catch(() => 'unknown')
 }
 
 // Public: detect by opening a temporary SSH connection (used by HostForm)
@@ -509,13 +674,15 @@ export function detectRemoteOs(config: SSHConnectionConfig): Promise<string> {
         kex: [
           'curve25519-sha256', 'curve25519-sha256@libssh.org',
           'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521',
-          'diffie-hellman-group-exchange-sha256', 'diffie-hellman-group14-sha256',
+          'diffie-hellman-group-exchange-sha256',
+          'diffie-hellman-group16-sha512', 'diffie-hellman-group15-sha512',
+          'diffie-hellman-group14-sha256',
           'diffie-hellman-group14-sha1', 'diffie-hellman-group-exchange-sha1',
           'diffie-hellman-group1-sha1'
         ],
         serverHostKey: [
-          'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521',
-          'rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa', 'ssh-dss'
+          'rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa', 'ssh-ed25519',
+          'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'ssh-dss'
         ],
         cipher: [
           'aes128-gcm', 'aes128-gcm@openssh.com', 'aes256-gcm', 'aes256-gcm@openssh.com',
@@ -539,13 +706,19 @@ export function detectRemoteOs(config: SSHConnectionConfig): Promise<string> {
       if (config.passphrase) connectConfig.passphrase = config.passphrase
     }
 
+    let remoteIdent = ''
+    connectConfig.debug = (m: string) => {
+      const im = /Remote ident:\s*'([^']*)'/i.exec(m)
+      if (im) remoteIdent = im[1].trim()
+    }
+
     client.on('keyboard-interactive', (_n, _i, _l, prompts, finish) => {
       finish(prompts.map(() => config.password ?? ''))
     })
 
     client.on('ready', () => {
       clearTimeout(masterTid)
-      detectOsWithClient(client).then(done).catch(() => done('unknown'))
+      detectOsWithClient(client, remoteIdent).then(done).catch(() => done('unknown'))
     })
 
     client.on('error', () => { clearTimeout(masterTid); done('unknown') })
