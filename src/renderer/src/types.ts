@@ -110,7 +110,7 @@ export interface RemoteLogConfig {
 }
 
 export type Theme = 'dark' | 'light'
-export type NavPage = 'hosts' | 'keys' | 'logs' | 'export' | 'terminal' | 'vault'
+export type NavPage = 'hosts' | 'keys' | 'logs' | 'export' | 'terminal' | 'vault' | 'cloud'
 
 export const SERVER_COLORS = [
   '#4c74ff', '#30d48a', '#f7b731', '#ff5757',

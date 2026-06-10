@@ -11,6 +11,7 @@ import HostForm from './components/Dashboard/HostForm'
 import LogsPanel from './components/Logs/LogsPanel'
 import ExportPanel from './components/Export/ExportPanel'
 import CredentialsPanel from './components/Vault/CredentialsPanel'
+import CloudPanel from './components/Cloud/CloudPanel'
 import SettingsPanel from './components/Dialogs/SettingsPanel'
 import UpdateNotification from './components/Layout/UpdateNotification'
 import type { Server, Tab, LogEntry } from './types'
@@ -20,7 +21,7 @@ export default function App() {
   const {
     setServers, setGroups, setKeys, setCredentials, setSettings,
     addTab, updateTab, removeTab, setActiveTab, setActivePage,
-    upsertServer, theme, setTheme, addLog,
+    upsertServer, theme, setTheme, addLog, setCloudRecovery,
     servers, tabs, activeTabId, activePage, rightPanel
   } = useAppStore()
 
@@ -56,7 +57,25 @@ export default function App() {
       if (server) upsertServer({ ...server, detectedOs })
     })
 
-    return () => { unsub(); unsubOs() }
+    // Cloud sync may pull new/updated records — reload local lists when notified.
+    const unsubCloud = window.api.cloud.onChanged(async () => {
+      const [s, g, k, c] = await Promise.all([
+        window.api.servers.list(), window.api.groups.list(),
+        window.api.keys.list(), window.api.credentials.list()
+      ])
+      setServers(s)
+      setGroups(g.slice().sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999)))
+      setKeys(k)
+      setCredentials(c)
+    })
+
+    // Password-recovery deep link (corpssh://) → go to Cloud page with the tokens.
+    const unsubRecovery = window.api.cloud.onRecovery((payload) => {
+      setCloudRecovery(payload)
+      setActivePage('cloud')
+    })
+
+    return () => { unsub(); unsubOs(); unsubCloud(); unsubRecovery() }
   }, [])
 
   const openSSHTab = async (server: Server, mode: 'terminal' | 'sftp') => {
@@ -149,6 +168,7 @@ export default function App() {
   const showLogs = activePage === 'logs'
   const showExport = activePage === 'export'
   const showVault = activePage === 'vault'
+  const showCloud = activePage === 'cloud'
   const showSettings = activePage === 'keys'
   const showRightPanel = rightPanel !== null && showHosts
 
@@ -257,6 +277,7 @@ export default function App() {
             {showLogs && <LogsPanel />}
             {showExport && <ExportPanel />}
             {showVault && <CredentialsPanel />}
+            {showCloud && <CloudPanel />}
             {showSettings && <SettingsPanel onClose={() => setActivePage('hosts')} />}
           </div>
         </div>

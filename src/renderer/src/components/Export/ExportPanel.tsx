@@ -1,22 +1,45 @@
 import { useState } from 'react'
-import { FileDown, FileUp, CheckCircle, XCircle, RefreshCw, FileCode, ShieldAlert } from 'lucide-react'
+import { FileDown, FileUp, CheckCircle, XCircle, RefreshCw, FileCode, ShieldAlert, Lock, KeyRound } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 
 export default function ExportPanel() {
-  const { servers, groups, upsertServer, upsertGroup } = useAppStore()
+  const { upsertServer, upsertGroup } = useAppStore()
+  const servers = useAppStore((s) => s.servers)
+  const groups = useAppStore((s) => s.groups)
   const [state, setState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
   const [message, setMessage] = useState('')
   const [includeCredentials, setIncludeCredentials] = useState(false)
+  const [exportPassword, setExportPassword] = useState('')
+  const [exportPasswordConfirm, setExportPasswordConfirm] = useState('')
+  // Set when an encrypted file was picked and we need its password to finish import.
+  const [awaitingImportPassword, setAwaitingImportPassword] = useState(false)
+  const [importPassword, setImportPassword] = useState('')
+
+  const applyResult = (result: { servers: any[]; groups: any[] }) => {
+    result.servers.forEach(upsertServer)
+    result.groups.forEach(upsertGroup)
+    setState('ok')
+    setMessage(`Imported: ${result.servers.length} server${result.servers.length !== 1 ? 's' : ''}, ${result.groups.length} group${result.groups.length !== 1 ? 's' : ''}`)
+  }
 
   const handleExport = async () => {
+    if (includeCredentials) {
+      if (exportPassword.length < 4) {
+        setState('error'); setMessage('Defina uma senha de pelo menos 4 caracteres'); return
+      }
+      if (exportPassword !== exportPasswordConfirm) {
+        setState('error'); setMessage('As senhas não coincidem'); return
+      }
+    }
     setState('loading')
     try {
       const path = includeCredentials
-        ? await window.api.xml.exportWithCredentials()
+        ? await window.api.xml.exportWithCredentials(exportPassword)
         : await window.api.xml.export()
       if (path) {
         setState('ok')
-        setMessage(includeCredentials ? `Exported with credentials to: ${path}` : `Exported to: ${path}`)
+        setMessage(includeCredentials ? `Exportado (criptografado) para: ${path}` : `Exported to: ${path}`)
+        setExportPassword(''); setExportPasswordConfirm('')
       } else {
         setState('idle')
       }
@@ -27,14 +50,25 @@ export default function ExportPanel() {
     setState('loading')
     try {
       const result = await window.api.xml.import()
-      if (result) {
-        result.servers.forEach(upsertServer)
-        result.groups.forEach(upsertGroup)
-        setState('ok')
-        setMessage(`Imported: ${result.servers.length} server${result.servers.length !== 1 ? 's' : ''}, ${result.groups.length} group${result.groups.length !== 1 ? 's' : ''}`)
-      } else {
+      if (!result) { setState('idle'); return }
+      if ((result as any).needsPassword) {
+        setAwaitingImportPassword(true)
+        setImportPassword('')
         setState('idle')
+        return
       }
+      applyResult(result as any)
+    } catch (e: any) { setState('error'); setMessage(e.message) }
+  }
+
+  const handleImportWithPassword = async () => {
+    if (!importPassword) return
+    setState('loading')
+    try {
+      const result = await window.api.xml.importWithPassword(importPassword)
+      applyResult(result as any)
+      setAwaitingImportPassword(false)
+      setImportPassword('')
     } catch (e: any) { setState('error'); setMessage(e.message) }
   }
 
@@ -114,6 +148,31 @@ export default function ExportPanel() {
                     Export with credentials (user &amp; password)
                   </span>
                 </label>
+
+                {includeCredentials && (
+                  <div className="flex flex-col gap-2 mt-3">
+                    <div className="flex items-center gap-1.5" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                      <Lock size={11} />
+                      <span>O arquivo é criptografado com esta senha. Sem ela, não há como importar.</span>
+                    </div>
+                    <input
+                      type="password"
+                      value={exportPassword}
+                      onChange={(e) => setExportPassword(e.target.value)}
+                      placeholder="Senha de criptografia"
+                      className="px-2.5 py-1.5 rounded-md"
+                      style={{ background: 'var(--bg-app)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12 }}
+                    />
+                    <input
+                      type="password"
+                      value={exportPasswordConfirm}
+                      onChange={(e) => setExportPasswordConfirm(e.target.value)}
+                      placeholder="Confirmar senha"
+                      className="px-2.5 py-1.5 rounded-md"
+                      style={{ background: 'var(--bg-app)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12 }}
+                    />
+                  </div>
+                )}
               </div>
               <button
                 onClick={handleExport}
@@ -141,6 +200,49 @@ export default function ExportPanel() {
               onClick={handleImport}
               loading={state === 'loading'}
             />
+
+            {awaitingImportPassword && (
+              <div
+                className="flex flex-col gap-2.5 p-4 rounded-xl animate-fade-in"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--warning, #f7b731)' }}
+              >
+                <div className="flex items-center gap-2" style={{ color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 }}>
+                  <KeyRound size={15} style={{ color: 'var(--warning, #f7b731)' }} />
+                  Arquivo criptografado
+                </div>
+                <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                  Digite a senha usada na exportação para importar este arquivo.
+                </p>
+                <input
+                  type="password"
+                  autoFocus
+                  value={importPassword}
+                  onChange={(e) => setImportPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleImportWithPassword() }}
+                  placeholder="Senha do arquivo"
+                  className="px-2.5 py-1.5 rounded-md"
+                  style={{ background: 'var(--bg-app)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12 }}
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleImportWithPassword}
+                    disabled={state === 'loading' || !importPassword}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium"
+                    style={{ background: 'var(--success)', color: '#fff', fontSize: 13, opacity: !importPassword ? 0.6 : 1 }}
+                  >
+                    {state === 'loading' ? <RefreshCw size={12} className="animate-spin" /> : null}
+                    Descriptografar e importar
+                  </button>
+                  <button
+                    onClick={() => { setAwaitingImportPassword(false); setImportPassword(''); setState('idle') }}
+                    className="px-3 py-2 rounded-lg font-medium"
+                    style={{ background: 'var(--bg-app)', color: 'var(--text-secondary)', border: '1px solid var(--border)', fontSize: 13 }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Status */}

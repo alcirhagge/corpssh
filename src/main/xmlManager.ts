@@ -1,5 +1,5 @@
-import * as fs from 'fs'
 import type { ServerRecord, GroupRecord } from './store'
+import { sealWithPassword, openWithPassword, type SealedBlob } from './crypto'
 
 export function exportToXML(servers: ServerRecord[], groups: GroupRecord[]): string {
   const groupsXml = groups.map((g) =>
@@ -57,6 +57,45 @@ export function exportToXMLWithCredentials(servers: ServerRecord[], groups: Grou
     '  </Servers>',
     '</CorpSSH>'
   ].join('\n')
+}
+
+// ─── Encrypted envelope ──────────────────────────────────────────────────────
+// "Export with credentials" no longer writes plaintext secrets. The credential-
+// bearing XML is sealed with a user password (scrypt + AES-256-GCM) and wrapped
+// in a small <CorpSSHEncrypted> envelope. Importing requires the same password,
+// so leaking the file does not leak credentials.
+const ENCRYPTED_ROOT = 'CorpSSHEncrypted'
+
+export function isEncryptedXML(xml: string): boolean {
+  return xml.includes(`<${ENCRYPTED_ROOT}`)
+}
+
+export function encryptXMLEnvelope(innerXml: string, password: string): string {
+  const blob = sealWithPassword(innerXml, password)
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<!-- CorpSSH Encrypted Export - ${new Date().toISOString()} -->`,
+    '<!-- Arquivo criptografado. Importe no CorpSSH usando a senha definida na exportacao. -->',
+    `<${ENCRYPTED_ROOT} version="1.0" kdf="scrypt" cipher="aes-256-gcm"`,
+    `  salt="${blob.salt}" iv="${blob.iv}" tag="${blob.tag}">${blob.data}</${ENCRYPTED_ROOT}>`
+  ].join('\n')
+}
+
+// Decrypt an envelope back to the inner XML. Throws on wrong password / corruption.
+export function decryptXMLEnvelope(xml: string, password: string): string {
+  const m = xml.match(/<CorpSSHEncrypted\s([^>]*?)>([\s\S]*?)<\/CorpSSHEncrypted>/)
+  if (!m) throw new Error('Arquivo criptografado invalido')
+  const attrs = parseAttrs(m[1])
+  const data = m[2].trim()
+  if (!attrs.salt || !attrs.iv || !attrs.tag || !data) {
+    throw new Error('Arquivo criptografado incompleto')
+  }
+  const blob: SealedBlob = { salt: attrs.salt, iv: attrs.iv, tag: attrs.tag, data }
+  try {
+    return openWithPassword(blob, password)
+  } catch {
+    throw new Error('Senha incorreta ou arquivo corrompido')
+  }
 }
 
 export interface ImportResult {

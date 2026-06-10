@@ -68,6 +68,7 @@ export interface ServerRecord {
   detectedOs?: string
   iconOverride?: string
   credentialId?: string
+  updatedAt?: number  // last local change (ms) — used for cloud LWW sync
 }
 
 // A reusable, named credential (the "vault"). A server may reference one via
@@ -82,6 +83,7 @@ export interface CredentialRecord {
   privateKeyPath?: string
   privateKeyContent?: string
   passphrase?: string
+  updatedAt?: number
 }
 
 export interface GroupRecord {
@@ -89,6 +91,8 @@ export interface GroupRecord {
   name: string
   color?: string
   expanded?: boolean
+  sortOrder?: number
+  updatedAt?: number
 }
 
 export interface KeyRecord {
@@ -96,6 +100,7 @@ export interface KeyRecord {
   name: string
   path: string
   comment?: string
+  updatedAt?: number
 }
 
 export interface AppSettings {
@@ -146,13 +151,23 @@ export function getServers(): ServerRecord[] {
   return ensureStore().servers.map((s) => mapSecrets(s, SERVER_SECRETS, decrypt))
 }
 
-export function saveServer(server: ServerRecord): void {
+function putServer(server: ServerRecord): void {
   const data = ensureStore()
   const enc = mapSecrets(server, SERVER_SECRETS, encrypt)
   const idx = data.servers.findIndex((s) => s.id === enc.id)
   if (idx >= 0) data.servers[idx] = enc
   else data.servers.push(enc)
   save(data)
+}
+
+// UI path: stamps updatedAt=now so the change propagates to the cloud.
+export function saveServer(server: ServerRecord): void {
+  putServer({ ...server, updatedAt: Date.now() })
+}
+
+// Sync path: writes a record pulled from the cloud, PRESERVING its updatedAt.
+export function upsertServerFromCloud(server: ServerRecord): void {
+  putServer(server)
 }
 
 export function deleteServer(id: string): void {
@@ -165,12 +180,20 @@ export function getGroups(): GroupRecord[] {
   return ensureStore().groups
 }
 
-export function saveGroup(group: GroupRecord): void {
+function putGroup(group: GroupRecord): void {
   const data = ensureStore()
   const idx = data.groups.findIndex((g) => g.id === group.id)
   if (idx >= 0) data.groups[idx] = group
   else data.groups.push(group)
   save(data)
+}
+
+export function saveGroup(group: GroupRecord): void {
+  putGroup({ ...group, updatedAt: Date.now() })
+}
+
+export function upsertGroupFromCloud(group: GroupRecord): void {
+  putGroup(group)
 }
 
 export function deleteGroup(id: string): void {
@@ -183,12 +206,20 @@ export function getKeys(): KeyRecord[] {
   return ensureStore().keys
 }
 
-export function saveKey(key: KeyRecord): void {
+function putKey(key: KeyRecord): void {
   const data = ensureStore()
   const idx = data.keys.findIndex((k) => k.id === key.id)
   if (idx >= 0) data.keys[idx] = key
   else data.keys.push(key)
   save(data)
+}
+
+export function saveKey(key: KeyRecord): void {
+  putKey({ ...key, updatedAt: Date.now() })
+}
+
+export function upsertKeyFromCloud(key: KeyRecord): void {
+  putKey(key)
 }
 
 export function deleteKey(id: string): void {
@@ -221,13 +252,21 @@ export function getCredentials(): CredentialRecord[] {
   return ensureStore().credentials.map((c) => mapSecrets(c, CRED_SECRETS, decrypt))
 }
 
-export function saveCredential(cred: CredentialRecord): void {
+function putCredential(cred: CredentialRecord): void {
   const data = ensureStore()
   const enc = mapSecrets(cred, CRED_SECRETS, encrypt)
   const idx = data.credentials.findIndex((c) => c.id === enc.id)
   if (idx >= 0) data.credentials[idx] = enc
   else data.credentials.push(enc)
   save(data)
+}
+
+export function saveCredential(cred: CredentialRecord): void {
+  putCredential({ ...cred, updatedAt: Date.now() })
+}
+
+export function upsertCredentialFromCloud(cred: CredentialRecord): void {
+  putCredential(cred)
 }
 
 export function deleteCredential(id: string): void {

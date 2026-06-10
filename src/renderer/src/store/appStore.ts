@@ -14,6 +14,7 @@ interface AppState {
   rightPanel: null | { mode: 'new'; groupId?: string } | { mode: 'edit'; server: Server }
   logs: LogEntry[]
   isLoading: boolean
+  cloudRecovery: { access_token: string; refresh_token: string; type: string | null } | null
 
   setServers: (s: Server[]) => void
   setGroups: (g: Group[]) => void
@@ -44,6 +45,7 @@ interface AppState {
   clearLogs: () => void
 
   setLoading: (v: boolean) => void
+  setCloudRecovery: (p: AppState['cloudRecovery']) => void
 }
 
 const defaultSettings: AppSettings = {
@@ -71,6 +73,7 @@ export const useAppStore = create<AppState>((set) => ({
   rightPanel: null,
   logs: [],
   isLoading: false,
+  cloudRecovery: null,
 
   setServers: (servers) => set({ servers }),
   setGroups: (groups) => set({ groups }),
@@ -137,5 +140,6 @@ export const useAppStore = create<AppState>((set) => ({
   setLogs: (logs) => set({ logs }),
   clearLogs: () => set({ logs: [] }),
 
-  setLoading: (v) => set({ isLoading: v })
+  setLoading: (v) => set({ isLoading: v }),
+  setCloudRecovery: (cloudRecovery) => set({ cloudRecovery })
 }))

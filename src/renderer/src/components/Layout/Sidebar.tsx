@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Monitor, List, FileDown, Settings, Terminal, KeyRound } from 'lucide-react'
+import { Monitor, List, FileDown, Settings, Terminal, KeyRound, Cloud } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { NavPage } from '../../types'
 
@@ -8,6 +8,7 @@ const NAV_ITEMS: { id: NavPage; label: string; icon: React.ReactNode }[] = [
   { id: 'vault',  label: 'Vault',  icon: <KeyRound size={15} /> },
   { id: 'logs',   label: 'Logs',   icon: <List size={15} /> },
   { id: 'export', label: 'Export', icon: <FileDown size={15} /> },
+  { id: 'cloud',  label: 'Cloud',  icon: <Cloud size={15} /> },
 ]
 
 export default function Sidebar() {

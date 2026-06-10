@@ -1,10 +1,33 @@
 import { app, shell, BrowserWindow, ipcMain, nativeImage } from 'electron'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import { setupIpcHandlers } from './ipcHandlers'
 
 let mainWindow: BrowserWindow | null = null
+
+// ─── Deep link (corpssh://) — used for password-recovery from the email link ──
+// The recovery email opens corpssh://auth-recovery#access_token=...&refresh_token=...
+// which lands here; we forward the tokens to the renderer to set a new password.
+let pendingRecovery: { access_token: string; refresh_token: string; type: string | null } | null = null
+
+function handleDeepLink(url: string): void {
+  try {
+    const frag = url.includes('#') ? url.split('#')[1] : url.split('?')[1] ?? ''
+    const p = new URLSearchParams(frag)
+    const access_token = p.get('access_token')
+    const refresh_token = p.get('refresh_token')
+    if (!access_token || !refresh_token) return
+    const payload = { access_token, refresh_token, type: p.get('type') }
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+      mainWindow.webContents.send('cloud:recovery', payload)
+    } else {
+      pendingRecovery = payload
+    }
+  } catch { /* ignore malformed links */ }
+}
 
 function setupAutoUpdater(): void {
   autoUpdater.autoDownload = true
@@ -72,6 +95,10 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow!.show()
+    if (pendingRecovery) {
+      mainWindow!.webContents.send('cloud:recovery', pendingRecovery)
+      pendingRecovery = null
+    }
     if (!is.dev) {
       setTimeout(() => autoUpdater.checkForUpdates(), 3000)
     }
@@ -90,6 +117,30 @@ function createWindow(): void {
 
   mainWindow.on('maximize', () => mainWindow?.webContents.send('window:maximized', true))
   mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximized', false))
+}
+
+// Register the corpssh:// protocol (dev needs the electron exe + script path).
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('corpssh', process.execPath, [resolve(process.argv[1])])
+  }
+} else {
+  app.setAsDefaultProtocolClient('corpssh')
+}
+
+// Single-instance: a second launch (e.g. clicking the recovery link) forwards its
+// URL to the already-running instance instead of opening a new window.
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', (_e, argv) => {
+    const url = argv.find((a) => a.startsWith('corpssh://'))
+    if (url) handleDeepLink(url)
+    else if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus() }
+  })
+  // macOS delivers the URL via open-url
+  app.on('open-url', (event, url) => { event.preventDefault(); handleDeepLink(url) })
 }
 
 app.whenReady().then(() => {
@@ -116,6 +167,10 @@ app.whenReady().then(() => {
   setupAutoUpdater()
   setupIpcHandlers()
   createWindow()
+
+  // Windows cold-start: the deep link arrives in argv on first launch.
+  const initialUrl = process.argv.find((a) => a.startsWith('corpssh://'))
+  if (initialUrl) handleDeepLink(initialUrl)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

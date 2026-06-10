@@ -3,7 +3,10 @@ import { randomUUID } from 'crypto'
 import * as fs from 'fs'
 import { addLogEntry, getLogs, clearLogs } from './logger'
 import { sendRemoteLog, testConnection, setRemoteConfig, type RemoteLogConfig } from './remoteLogger'
-import { exportToXML, exportToXMLWithCredentials, importFromXML } from './xmlManager'
+import {
+  exportToXML, exportToXMLWithCredentials, importFromXML,
+  isEncryptedXML, encryptXMLEnvelope, decryptXMLEnvelope, type ImportResult
+} from './xmlManager'
 import {
   createSessionLog, closeSessionLog, listSessions, readSessionLog,
   deleteSession, cleanupOrphanedSessions
@@ -49,6 +52,11 @@ import {
   type KeyRecord,
   type CredentialRecord
 } from './store'
+import {
+  isCloudConfigured, cloudStatus, cloudSignUp, cloudSignIn, cloudSignOut,
+  resetPassword, verifyRecovery, applyRecovery
+} from './cloudClient'
+import { syncNow } from './cloudSync'
 import * as path from 'path'
 import * as os from 'os'
 
@@ -177,20 +185,35 @@ export function setupIpcHandlers(): void {
     return result.filePath
   })
 
-  ipcMain.handle('xml:exportWithCredentials', async () => {
+  // Export with credentials is ALWAYS encrypted now: the credential-bearing XML
+  // is sealed with the user's password before hitting disk.
+  ipcMain.handle('xml:exportWithCredentials', async (_e, password: string) => {
+    if (!password || password.length < 4) {
+      throw new Error('Senha de exportacao muito curta (minimo 4 caracteres)')
+    }
     const win = BrowserWindow.getAllWindows()[0]
     const result = await dialog.showSaveDialog(win, {
-      title: 'Exportar servidores com credenciais',
-      defaultPath: `corpssh-export-credentials-${Date.now()}.xml`,
+      title: 'Exportar servidores com credenciais (criptografado)',
+      defaultPath: `corpssh-export-secure-${Date.now()}.xml`,
       filters: [{ name: 'XML', extensions: ['xml'] }]
     })
     if (result.canceled || !result.filePath) return null
-    const servers = getServers()
-    const groups = getGroups()
-    const xml = exportToXMLWithCredentials(servers, groups)
-    require('fs').writeFileSync(result.filePath, xml, 'utf-8')
+    const inner = exportToXMLWithCredentials(getServers(), getGroups())
+    const xml = encryptXMLEnvelope(inner, password)
+    fs.writeFileSync(result.filePath, xml, 'utf-8')
     return result.filePath
   })
+
+  // Holds the raw content of an encrypted file picked via xml:import while the
+  // renderer prompts for its password (then resolved by xml:importWithPassword).
+  let pendingEncryptedImport: string | null = null
+
+  const applyImport = (xml: string): ImportResult => {
+    const data = importFromXML(xml)
+    data.groups.forEach(g => { if (!g.id) g.id = generateId(); saveGroup(g) })
+    data.servers.forEach(s => { if (!s.id) s.id = generateId(); saveServer(s) })
+    return data
+  }
 
   ipcMain.handle('xml:import', async () => {
     const win = BrowserWindow.getAllWindows()[0]
@@ -201,10 +224,35 @@ export function setupIpcHandlers(): void {
     })
     if (result.canceled || !result.filePaths.length) return null
     const xml = fs.readFileSync(result.filePaths[0], 'utf-8')
-    const data = importFromXML(xml)
-    data.groups.forEach(g => { if (!g.id) g.id = generateId(); saveGroup(g) })
-    data.servers.forEach(s => { if (!s.id) s.id = generateId(); saveServer(s) })
-    return data
+    if (isEncryptedXML(xml)) {
+      pendingEncryptedImport = xml
+      return { needsPassword: true }
+    }
+    return applyImport(xml)
+  })
+
+  ipcMain.handle('xml:importWithPassword', async (_e, password: string) => {
+    if (!pendingEncryptedImport) throw new Error('Nenhuma importacao pendente')
+    const enc = pendingEncryptedImport
+    pendingEncryptedImport = null
+    const xml = decryptXMLEnvelope(enc, password) // throws on wrong password
+    return applyImport(xml)
+  })
+
+  // --- Cloud account (opt-in) ---
+  ipcMain.handle('cloud:configured', () => isCloudConfigured())
+  ipcMain.handle('cloud:status', () => cloudStatus())
+  ipcMain.handle('cloud:signUp', (_e, email: string, password: string) => cloudSignUp(email, password))
+  ipcMain.handle('cloud:signIn', (_e, email: string, password: string) => cloudSignIn(email, password))
+  ipcMain.handle('cloud:signOut', () => cloudSignOut())
+  ipcMain.handle('cloud:resetPassword', (_e, email: string) => resetPassword(email))
+  ipcMain.handle('cloud:verifyRecovery', (_e, email: string, token: string, pw: string) => verifyRecovery(email, token, pw))
+  ipcMain.handle('cloud:applyRecovery', (_e, at: string, rt: string, pw: string) => applyRecovery(at, rt, pw))
+  ipcMain.handle('cloud:sync', async () => {
+    const result = await syncNow()
+    // Tell the renderer to reload its lists (pull may have changed local data).
+    BrowserWindow.getAllWindows()[0]?.webContents.send('cloud:changed')
+    return result
   })
 
   // --- RDP ---

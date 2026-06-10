@@ -135,8 +135,32 @@ const api = {
   // XML
   xml: {
     export: () => ipcRenderer.invoke('xml:export'),
-    exportWithCredentials: () => ipcRenderer.invoke('xml:exportWithCredentials'),
-    import: () => ipcRenderer.invoke('xml:import')
+    exportWithCredentials: (password: string) =>
+      ipcRenderer.invoke('xml:exportWithCredentials', password),
+    import: () => ipcRenderer.invoke('xml:import'),
+    importWithPassword: (password: string) =>
+      ipcRenderer.invoke('xml:importWithPassword', password)
+  },
+
+  // Cloud account (opt-in)
+  cloud: {
+    configured: (): Promise<boolean> => ipcRenderer.invoke('cloud:configured'),
+    status: () => ipcRenderer.invoke('cloud:status'),
+    signUp: (email: string, password: string) => ipcRenderer.invoke('cloud:signUp', email, password),
+    signIn: (email: string, password: string) => ipcRenderer.invoke('cloud:signIn', email, password),
+    signOut: () => ipcRenderer.invoke('cloud:signOut'),
+    resetPassword: (email: string) => ipcRenderer.invoke('cloud:resetPassword', email),
+    verifyRecovery: (email: string, token: string, pw: string) => ipcRenderer.invoke('cloud:verifyRecovery', email, token, pw),
+    applyRecovery: (at: string, rt: string, pw: string) => ipcRenderer.invoke('cloud:applyRecovery', at, rt, pw),
+    sync: () => ipcRenderer.invoke('cloud:sync'),
+    onChanged: (cb: () => void) => {
+      ipcRenderer.on('cloud:changed', cb)
+      return () => ipcRenderer.removeAllListeners('cloud:changed')
+    },
+    onRecovery: (cb: (p: { access_token: string; refresh_token: string; type: string | null }) => void) => {
+      ipcRenderer.on('cloud:recovery', (_e, p) => cb(p))
+      return () => ipcRenderer.removeAllListeners('cloud:recovery')
+    }
   },
 
   // Auto-update
