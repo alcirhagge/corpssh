@@ -20,6 +20,27 @@ Acesse a [última release](https://github.com/alcirhagge/corpssh/releases/latest
 
 ---
 
+## Instalação no Windows (aviso do SmartScreen)
+
+O instalador **não é assinado com um certificado comercial** (cert de code signing custa dinheiro). Por isso, na primeira execução o Windows SmartScreen mostra um aviso azul — *"O Windows protegeu o seu PC"*. Isso acontece com **qualquer** aplicativo sem certificado pago e **não significa** que o app é malicioso: o código-fonte é aberto e está inteiro neste repositório.
+
+Para instalar mesmo assim:
+
+1. Clique em **Mais informações**
+2. Clique em **Executar assim mesmo**
+
+### Verificar a integridade do download (opcional)
+
+Cada release publica o arquivo `SHA256SUMS-windows.txt`. Para conferir que o instalador não foi adulterado, rode no PowerShell:
+
+```powershell
+Get-FileHash .\CorpSSH-x.x.x-setup.exe -Algorithm SHA256
+```
+
+O hash exibido deve ser igual ao que está em `SHA256SUMS-windows.txt`.
+
+---
+
 ## Funcionalidades
 
 **Conexões SSH**
