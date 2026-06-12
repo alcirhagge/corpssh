@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Terminal, Palette, Key, Info } from 'lucide-react'
+import { X, Terminal, Palette, Key, Info, Pipette } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { THEMES, applyTheme, getThemeBase } from '../../themes'
 import type { AppSettings } from '../../types'
@@ -11,6 +11,9 @@ interface SettingsPanelProps {
 }
 
 type Section = 'appearance' | 'terminal' | 'keys' | 'about'
+
+// Quick-pick terminal text colors (classic phosphor / amber / paper / cyan)
+const TERM_COLOR_PRESETS = ['#3bdc6b', '#ffb000', '#e8eaf0', '#5ad7ff', '#ff6b9d']
 
 export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const { settings, setSettings, theme, setTheme, keys, upsertKey, removeKey } = useAppStore()
@@ -50,14 +53,15 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}
       onClick={onClose}
     >
       <div
-        className="rounded-xl shadow-2xl flex overflow-hidden animate-fade-in"
+        className="rounded-xl flex overflow-hidden animate-fade-in cs-glass-strong"
         style={{
           background: 'var(--bg-surface)',
-          border: '1px solid var(--border)',
+          border: '1px solid var(--glass-border)',
+          boxShadow: 'var(--glass-shadow)',
           width: 640,
           height: 480
         }}
@@ -186,6 +190,50 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </div>
                 </SettingRow>
 
+                <SettingRow label="Text Color" description="Terminal font color (Theme = follow palette)">
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    {TERM_COLOR_PRESETS.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => set('terminalFgColor', c)}
+                        title={c}
+                        style={{
+                          width: 22, height: 22, borderRadius: 6, background: c,
+                          border: (form.terminalFgColor ?? '').toLowerCase() === c.toLowerCase()
+                            ? '2px solid var(--accent)' : '1px solid var(--border)',
+                          cursor: 'pointer', flexShrink: 0
+                        }}
+                      />
+                    ))}
+                    <label
+                      className="flex items-center justify-center relative"
+                      title="Custom color"
+                      style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-input)', cursor: 'pointer', flexShrink: 0 }}
+                    >
+                      <Pipette size={11} style={{ color: 'var(--text-secondary)' }} />
+                      <input
+                        type="color"
+                        value={form.terminalFgColor || '#c8cad8'}
+                        onChange={(e) => set('terminalFgColor', e.target.value)}
+                        style={{ position: 'absolute', inset: 0, opacity: 0, padding: 0, cursor: 'pointer' }}
+                      />
+                    </label>
+                    <button
+                      onClick={() => set('terminalFgColor', '')}
+                      title="Use theme default"
+                      className="px-2 rounded"
+                      style={{
+                        height: 22, fontSize: 10, flexShrink: 0,
+                        background: !form.terminalFgColor ? 'var(--accent)' : 'var(--bg-input)',
+                        color: !form.terminalFgColor ? '#fff' : 'var(--text-secondary)',
+                        border: `1px solid ${!form.terminalFgColor ? 'var(--accent)' : 'var(--border)'}`
+                      }}
+                    >
+                      Theme
+                    </button>
+                  </div>
+                </SettingRow>
+
                 <SettingRow label="Cursor Style">
                   <div className="flex gap-2">
                     {(['block', 'bar', 'underline'] as const).map(style => (
@@ -207,6 +255,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
 
                 <SettingRow label="Blinking Cursor">
                   <Toggle value={form.cursorBlink} onChange={v => set('cursorBlink', v)} />
+                </SettingRow>
+
+                <SettingRow label="Auto Colors (Linux)" description="Enable ls / grep / ip colors on connect">
+                  <Toggle value={form.terminalAutoColor !== false} onChange={v => set('terminalAutoColor', v)} />
                 </SettingRow>
 
                 <SettingRow label="Scrollback" description="Number of lines in history">
@@ -285,7 +337,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                     ['OS Detection', 'Linux, MikroTik, OLT, ESP32...'],
                     ['SSH Keys', 'Ed25519, RSA, PEM, PPK'],
                     ['Remote Logging', 'Graylog, Loki, Elasticsearch'],
-                    ['Themes', 'Dark / Light / Navy'],
+                    ['Themes', '6 glass themes + terminal colors'],
                   ].map(([feat, desc]) => (
                     <div key={feat} className="flex flex-col gap-0.5">
                       <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)', fontSize: 11 }}>{feat}</span>
@@ -369,12 +421,12 @@ function SettingsThemeSwatch({ theme, active, onClick }: {
     >
       <div
         className="rounded overflow-hidden"
-        style={{ width: 52, height: 34, background: theme.bg, position: 'relative', border: '1px solid rgba(128,128,128,0.15)' }}
+        style={{ width: 52, height: 34, background: `linear-gradient(140deg, ${theme.accent} 0%, ${theme.surface} 52%, ${theme.bg} 100%)`, position: 'relative', border: '1px solid rgba(255,255,255,0.22)' }}
       >
-        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 12, background: theme.surface }} />
-        <div style={{ position: 'absolute', right: 6, top: 7, width: 10, height: 10, borderRadius: 3, background: theme.accent }} />
-        <div style={{ position: 'absolute', left: 16, top: 9, width: 24, height: 3, borderRadius: 2, background: theme.text, opacity: 0.4 }} />
-        <div style={{ position: 'absolute', left: 16, top: 15, width: 18, height: 3, borderRadius: 2, background: theme.text, opacity: 0.2 }} />
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 12, background: theme.surface, opacity: 0.85 }} />
+        <div style={{ position: 'absolute', right: 6, bottom: 6, width: 10, height: 10, borderRadius: '50%', background: theme.accent, boxShadow: `0 0 6px ${theme.accent}` }} />
+        <div style={{ position: 'absolute', left: 16, top: 9, width: 24, height: 3, borderRadius: 2, background: theme.text, opacity: 0.45 }} />
+        <div style={{ position: 'absolute', left: 16, top: 15, width: 18, height: 3, borderRadius: 2, background: theme.text, opacity: 0.25 }} />
       </div>
       <span style={{ fontSize: 10, color: active ? 'var(--accent)' : 'var(--text-secondary)', fontWeight: active ? 600 : 400 }}>
         {theme.name}

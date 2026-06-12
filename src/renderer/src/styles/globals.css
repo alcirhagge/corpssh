@@ -7,209 +7,103 @@
 /* ─── UI Font Size ─── */
 :root { --ui-font-size: 15px; }
 
-/* ─── NAVY (dark blue — default) ─── */
-:root,
-.dark,
-[data-theme="navy"] {
-  --bg-app:       #13141e;
-  --bg-surface:   #191c2a;
-  --bg-elevated:  #1e2137;
-  --bg-card:      #1e2137;
-  --bg-input:     #181b28;
-  --bg-hover:     #21253b;
-  --bg-active:    #272c44;
-  --border:        #282c43;
-  --border-subtle: #1c1f31;
-  --text-primary:   #c8cad8;
-  --text-secondary: #7b80a0;
-  --text-muted:     #42476a;
+/* ─── NAVY (glass, dark blue — default / first paint) ─────────────────────────
+   First-paint defaults only. applyTheme() (themes.ts) sets the real per-theme
+   variables as INLINE styles on <html>, which beat this block. Scope this to
+   :root ONLY — using `.dark` here would keep matching every dark theme and
+   fight the selected accent (that's why dark buttons stayed navy blue). */
+:root {
+  --bg-app: transparent;
+  --bg-app-base: #070810;
+  --aurora-1: rgba(76,116,255,0.16);
+  --aurora-2: rgba(120,90,255,0.13);
+  --aurora-3: rgba(40,90,200,0.12);
+
+  --bg-surface:   rgba(26,30,52,0.62);
+  --bg-elevated:  rgba(26,30,52,0.80);
+  --bg-card:      rgba(26,30,52,0.58);
+  --bg-input:     rgba(26,30,52,0.64);
+  --bg-hover:     rgba(255,255,255,0.055);
+  --bg-active:    rgba(255,255,255,0.10);
+  --border:        rgba(255,255,255,0.10);
+  --border-subtle: rgba(255,255,255,0.055);
+
+  --titlebar-bg: rgba(26,30,52,0.74);
+  --sidebar-bg:  rgba(26,30,52,0.60);
+  --tabbar-bg:   rgba(26,30,52,0.56);
+
+  --text-primary:   #d2d4e4;
+  --text-secondary: #8388a8;
+  --text-muted:     #4a4f74;
   --text-link:      #4c74ff;
+
   --accent:        #4c74ff;
   --accent-hover:  #6688ff;
-  --accent-subtle: rgba(76,116,255,0.15);
-  --success: #30d48a; --success-subtle: rgba(48,212,138,0.12);
-  --warning: #f7b731; --warning-subtle: rgba(247,183,49,0.12);
-  --error:   #ff5757; --error-subtle:   rgba(255,87,87,0.12);
-  --purple:  #a77bff; --purple-subtle:  rgba(167,123,255,0.12);
+  --accent-rgb:    76, 116, 255;
+  --accent-subtle: rgba(76,116,255,0.16);
+
+  --success: #30d48a; --success-subtle: rgba(48,212,138,0.14);
+  --warning: #f7b731; --warning-subtle: rgba(247,183,49,0.14);
+  --error:   #ff5757; --error-subtle:   rgba(255,87,87,0.14);
+  --purple:  #a77bff; --purple-subtle:  rgba(167,123,255,0.14);
   --orange:  #ff8c42;
-  --titlebar-bg: #0e0f18;
-  --sidebar-bg:  #191c2a;
-  --tabbar-bg:   #13141e;
+
   --scrollbar-track: transparent;
-  --scrollbar-thumb: #282c43;
-  --scrollbar-thumb-hover: #363b58;
-  --terminal-bg: #0e0f18; --terminal-fg: #c8cad8;
+  --scrollbar-thumb: rgba(255,255,255,0.13);
+  --scrollbar-thumb-hover: rgba(255,255,255,0.22);
+
+  --glass-blur: blur(20px) saturate(150%);
+  --glass-blur-strong: blur(34px) saturate(160%);
+  --glass-border: rgba(255,255,255,0.10);
+  --glass-highlight: rgba(255,255,255,0.06);
+  --glass-shadow: 0 8px 32px rgba(0,0,0,0.42);
+
+  --terminal-bg: #0a0b12; --terminal-fg: #aeb9ea;
   --terminal-cursor: #4c74ff; --terminal-selection: rgba(76,116,255,0.3);
-}
-
-/* ─── NOIR (dark red) ─── */
-[data-theme="noir"] {
-  --bg-app:       #0e0909;
-  --bg-surface:   #150c0c;
-  --bg-elevated:  #1c1010;
-  --bg-card:      #1c1010;
-  --bg-input:     #130a0a;
-  --bg-hover:     #211212;
-  --bg-active:    #2a1515;
-  --border:        #2d1515;
-  --border-subtle: #1e0e0e;
-  --text-primary:   #d8c8c8;
-  --text-secondary: #9a7070;
-  --text-muted:     #5a3838;
-  --text-link:      #ff5555;
-  --accent:        #e84040;
-  --accent-hover:  #ff5555;
-  --accent-subtle: rgba(232,64,64,0.15);
-  --success: #40d48a; --success-subtle: rgba(64,212,138,0.12);
-  --warning: #f7b731; --warning-subtle: rgba(247,183,49,0.12);
-  --error:   #ff7070; --error-subtle:   rgba(255,112,112,0.12);
-  --purple:  #c87bff; --purple-subtle:  rgba(200,123,255,0.12);
-  --orange:  #ff7042;
-  --titlebar-bg: #090606;
-  --sidebar-bg:  #150c0c;
-  --tabbar-bg:   #0e0909;
-  --scrollbar-thumb: #2d1515; --scrollbar-thumb-hover: #401d1d;
-  --terminal-bg: #090606; --terminal-fg: #d8c8c8;
-  --terminal-cursor: #e84040; --terminal-selection: rgba(232,64,64,0.3);
-}
-
-/* ─── MATRIX (dark green) ─── */
-[data-theme="matrix"] {
-  --bg-app:       #080e08;
-  --bg-surface:   #0c130c;
-  --bg-elevated:  #111811;
-  --bg-card:      #111811;
-  --bg-input:     #0a1009;
-  --bg-hover:     #151f15;
-  --bg-active:    #1a271a;
-  --border:        #1e2e1e;
-  --border-subtle: #121a12;
-  --text-primary:   #c0d8c0;
-  --text-secondary: #6a9a6a;
-  --text-muted:     #3a5a3a;
-  --text-link:      #00e878;
-  --accent:        #00d068;
-  --accent-hover:  #00f07a;
-  --accent-subtle: rgba(0,208,104,0.15);
-  --success: #00e878; --success-subtle: rgba(0,232,120,0.12);
-  --warning: #e8c040; --warning-subtle: rgba(232,192,64,0.12);
-  --error:   #ff5555; --error-subtle:   rgba(255,85,85,0.12);
-  --purple:  #78ff78; --purple-subtle:  rgba(120,255,120,0.12);
-  --orange:  #70d050;
-  --titlebar-bg: #050a05;
-  --sidebar-bg:  #0c130c;
-  --tabbar-bg:   #080e08;
-  --scrollbar-thumb: #1e2e1e; --scrollbar-thumb-hover: #2a3e2a;
-  --terminal-bg: #050a05; --terminal-fg: #c0d8c0;
-  --terminal-cursor: #00e878; --terminal-selection: rgba(0,208,104,0.3);
-}
-
-/* ─── CLEAN (light blue) ─── */
-.light,
-[data-theme="clean"] {
-  --bg-app:       #f0f2f8;
-  --bg-surface:   #ffffff;
-  --bg-elevated:  #f5f7fc;
-  --bg-card:      #ffffff;
-  --bg-input:     #f0f2f8;
-  --bg-hover:     #eaecf4;
-  --bg-active:    #e2e5f0;
-  --border:        #d4d8ec;
-  --border-subtle: #eaecf4;
-  --text-primary:   #1e2040;
-  --text-secondary: #606480;
-  --text-muted:     #9ea3bc;
-  --text-link:      #2952cc;
-  --accent:        #2952cc;
-  --accent-hover:  #3d66e8;
-  --accent-subtle: rgba(41,82,204,0.1);
-  --success: #1db87a; --success-subtle: rgba(29,184,122,0.1);
-  --warning: #d49a0a; --warning-subtle: rgba(212,154,10,0.1);
-  --error:   #e53535; --error-subtle:   rgba(229,53,53,0.1);
-  --purple:  #7c52d9; --purple-subtle:  rgba(124,82,217,0.1);
-  --orange:  #d96e28;
-  --titlebar-bg: #e8ebf6;
-  --sidebar-bg:  #eceef8;
-  --tabbar-bg:   #f0f2f8;
-  --scrollbar-thumb: #d4d8ec; --scrollbar-thumb-hover: #b8bdd8;
-  --terminal-bg: #ffffff; --terminal-fg: #1e2040;
-  --terminal-cursor: #2952cc; --terminal-selection: rgba(41,82,204,0.2);
-}
-
-/* ─── WARM (light amber) ─── */
-[data-theme="warm"] {
-  --bg-app:       #f5f0e8;
-  --bg-surface:   #fdfaf4;
-  --bg-elevated:  #ede6d6;
-  --bg-card:      #fdfaf4;
-  --bg-input:     #f0ead8;
-  --bg-hover:     #e8e0cc;
-  --bg-active:    #ddd5c0;
-  --border:        #c8bfa8;
-  --border-subtle: #e0d8c4;
-  --text-primary:   #2d1a06;
-  --text-secondary: #7a5c30;
-  --text-muted:     #a89060;
-  --text-link:      #b85c00;
-  --accent:        #c46a00;
-  --accent-hover:  #e07800;
-  --accent-subtle: rgba(196,106,0,0.12);
-  --success: #2a9a5a; --success-subtle: rgba(42,154,90,0.12);
-  --warning: #c87800; --warning-subtle: rgba(200,120,0,0.12);
-  --error:   #cc3333; --error-subtle:   rgba(204,51,51,0.12);
-  --purple:  #8844aa; --purple-subtle:  rgba(136,68,170,0.12);
-  --orange:  #e06000;
-  --titlebar-bg: #ece4d2;
-  --sidebar-bg:  #ede6d6;
-  --tabbar-bg:   #f5f0e8;
-  --scrollbar-thumb: #c8bfa8; --scrollbar-thumb-hover: #b0a490;
-  --terminal-bg: #fdfaf4; --terminal-fg: #2d1a06;
-  --terminal-cursor: #c46a00; --terminal-selection: rgba(196,106,0,0.2);
-}
-
-/* ─── VIOLET (light purple) ─── */
-[data-theme="violet"] {
-  --bg-app:       #f0ecfa;
-  --bg-surface:   #faf8ff;
-  --bg-elevated:  #e8e0f8;
-  --bg-card:      #faf8ff;
-  --bg-input:     #ede8f8;
-  --bg-hover:     #e4ddf5;
-  --bg-active:    #d8d0ee;
-  --border:        #c0b4e0;
-  --border-subtle: #e4ddf5;
-  --text-primary:   #1a0a3a;
-  --text-secondary: #5e4480;
-  --text-muted:     #9080b0;
-  --text-link:      #6628cc;
-  --accent:        #6628cc;
-  --accent-hover:  #7a3ae0;
-  --accent-subtle: rgba(102,40,204,0.12);
-  --success: #1a9a6a; --success-subtle: rgba(26,154,106,0.12);
-  --warning: #b07800; --warning-subtle: rgba(176,120,0,0.12);
-  --error:   #cc2244; --error-subtle:   rgba(204,34,68,0.12);
-  --purple:  #6628cc; --purple-subtle:  rgba(102,40,204,0.12);
-  --orange:  #c05020;
-  --titlebar-bg: #e6dffa;
-  --sidebar-bg:  #e8e0f8;
-  --tabbar-bg:   #f0ecfa;
-  --scrollbar-thumb: #c0b4e0; --scrollbar-thumb-hover: #a898cc;
-  --terminal-bg: #faf8ff; --terminal-fg: #1a0a3a;
-  --terminal-cursor: #6628cc; --terminal-selection: rgba(102,40,204,0.2);
 }
 
 /* ─── Base ─── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html, body, #root {
+html, body {
   height: 100%; width: 100%; overflow: hidden;
-  background: var(--bg-app);
+  background: var(--bg-app-base);
   color: var(--text-primary);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: var(--ui-font-size, 15px);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   user-select: none;
+}
+#root { height: 100%; width: 100%; overflow: hidden; background: transparent; position: relative; }
+
+/* ─── Aurora background ───────────────────────────────────────────────────────
+   Soft, theme-tinted radial blobs painted behind the entire app. Every
+   translucent surface (.cs-glass) frosts this layer, so the active theme's
+   color bleeds through the whole UI — not just the terminal. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: -25%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 46% at 14% 18%, var(--aurora-1), transparent 72%),
+    radial-gradient(44% 52% at 86% 12%, var(--aurora-2), transparent 72%),
+    radial-gradient(52% 60% at 50% 98%, var(--aurora-3), transparent 72%);
+  filter: blur(46px) saturate(140%);
+  transition: background 0.4s ease;
+}
+body > #root { z-index: 1; }
+
+/* ─── Glassmorphism utilities ─── */
+.cs-glass {
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+.cs-glass-strong {
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
 }
 
 /* ─── Scrollbar ─── */
@@ -225,9 +119,11 @@ html, body, #root {
 input, textarea, select {
   user-select: text;
   background: var(--bg-input);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border);
   color: var(--text-primary);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 7px 10px;
   font-family: 'Inter', sans-serif;
   font-size: calc(var(--ui-font-size, 15px) * 0.93);
@@ -242,7 +138,7 @@ input:focus, textarea:focus, select:focus {
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
 
 /* ─── Button reset ─── */
-button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; border-radius: 6px; transition: all 0.15s; }
+button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; border-radius: 8px; transition: all 0.15s; }
 
 /* ─── Drag ─── */
 .drag { -webkit-app-region: drag; }
@@ -271,24 +167,16 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; border
 .xterm-viewport::-webkit-scrollbar-thumb { background:var(--scrollbar-thumb); border-radius:5px; }
 
 /* ─── Font scale comfort ─── */
-/* Bump Tailwind's text-xs/text-sm slightly to match the larger base */
 .text-xs  { font-size: 0.8125rem; }   /* 13px at 16px root */
 .text-sm  { font-size: 0.9rem;    }   /* ~14.4px */
 
 /* ─── Theme accent accents throughout the UI ─── */
-/* Sidebar active indicator uses accent line */
 [data-active-nav]::before {
   content: '';
   position: absolute; left: 0; top: 20%; bottom: 20%;
   width: 3px; border-radius: 0 2px 2px 0;
   background: var(--accent);
 }
-/* Input focus glow uses theme accent */
-input:focus, textarea:focus, select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-subtle);
-}
-/* Scrollbar thumb uses accent tint on hover */
 ::-webkit-scrollbar-thumb:active { background: var(--accent); opacity: 0.6; }
 
 /* ─── Host icon ─── */

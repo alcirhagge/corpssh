@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, Eye, EyeOff, Folder, Sparkles } from 'lucide-react'
+import { X, Eye, EyeOff, Folder, Sparkles, Plus, FolderPlus, MonitorDot } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Server } from '../../types'
 import { HOST_ICON_COLORS } from '../../types'
@@ -115,8 +115,8 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
 
   return (
     <div
-      className="flex flex-col h-full animate-slide-right"
-      style={{ width: 280, background: 'var(--bg-surface)', borderLeft: '1px solid var(--border)', flexShrink: 0 }}
+      className="flex flex-col h-full animate-slide-right cs-glass-strong"
+      style={{ width: 280, background: 'var(--bg-surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', flexShrink: 0 }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -469,6 +469,85 @@ function FormSection({ label, children }: { label: string; children: React.React
         {label}
       </p>
       {children}
+    </div>
+  )
+}
+
+// ─── Empty side panel ─────────────────────────────────────────────────────────
+// Shown in the (now permanently docked) right column when nothing is selected.
+// Offers the quick "new connection / new group" actions so the panel never
+// pops in/out and reflows the host grid.
+export function EmptyHostPanel() {
+  const { setRightPanel, upsertGroup } = useAppStore()
+  const [addingGroup, setAddingGroup] = useState(false)
+  const [groupName, setGroupName] = useState('')
+
+  const commitGroup = async () => {
+    const name = groupName.trim()
+    if (name) {
+      const saved = await window.api.groups.save({ id: '', name })
+      upsertGroup(saved)
+    }
+    setGroupName('')
+    setAddingGroup(false)
+  }
+
+  return (
+    <div
+      className="flex flex-col h-full cs-glass-strong"
+      style={{ width: 280, background: 'var(--bg-surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', flexShrink: 0 }}
+    >
+      <div className="flex flex-col items-center justify-center flex-1 px-6 text-center gap-5">
+        <div
+          className="flex items-center justify-center"
+          style={{ width: 64, height: 64, borderRadius: 18, background: 'var(--accent-subtle)', border: '1px solid var(--glass-border)' }}
+        >
+          <MonitorDot size={28} style={{ color: 'var(--accent)' }} />
+        </div>
+        <div>
+          <p className="font-semibold" style={{ color: 'var(--text-primary)', fontSize: 15 }}>Nothing selected</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            Create a connection or a group<br />to organize your hosts.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 w-full" style={{ maxWidth: 200 }}>
+          <button
+            onClick={() => setRightPanel({ mode: 'new' })}
+            className="flex items-center justify-center gap-2 py-2.5 rounded-lg font-medium"
+            style={{ background: 'var(--accent)', color: '#fff', fontSize: 13 }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--accent)')}
+          >
+            <Plus size={16} /> New Connection
+          </button>
+
+          {addingGroup ? (
+            <input
+              autoFocus
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitGroup() }
+                if (e.key === 'Escape') { setAddingGroup(false); setGroupName('') }
+              }}
+              onBlur={commitGroup}
+              placeholder="Group name..."
+              style={{ fontSize: 13, textAlign: 'center' }}
+            />
+          ) : (
+            <button
+              onClick={() => setAddingGroup(true)}
+              className="flex items-center justify-center gap-2 py-2.5 rounded-lg font-medium"
+              style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)', fontSize: 13 }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+            >
+              <FolderPlus size={16} /> New Group
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

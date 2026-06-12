@@ -7,7 +7,7 @@ import TabBar from './components/Terminal/TabBar'
 import TerminalPane from './components/Terminal/TerminalPane'
 import SFTPBrowser from './components/SFTP/SFTPBrowser'
 import HostDashboard from './components/Dashboard/HostDashboard'
-import HostForm from './components/Dashboard/HostForm'
+import HostForm, { EmptyHostPanel } from './components/Dashboard/HostForm'
 import LogsPanel from './components/Logs/LogsPanel'
 import ExportPanel from './components/Export/ExportPanel'
 import CredentialsPanel from './components/Vault/CredentialsPanel'
@@ -170,7 +170,6 @@ export default function App() {
   const showVault = activePage === 'vault'
   const showCloud = activePage === 'cloud'
   const showSettings = activePage === 'keys'
-  const showRightPanel = rightPanel !== null && showHosts
 
   return (
     <div className={`flex flex-col h-screen ${theme}`} style={{ background: 'var(--bg-app)' }}>
@@ -194,14 +193,17 @@ export default function App() {
 
           {/* Page content */}
           <div className="flex flex-1 overflow-hidden relative">
-            {/* Hosts dashboard — sempre ocupa 100% da largura; o form fica em overlay */}
+            {/* Hosts dashboard + docked side panel.
+                The side panel is now ALWAYS present (fixed column) so opening the
+                host editor no longer reflows/bugs the grid. When nothing is
+                selected it shows quick "new connection / new group" actions. */}
             {showHosts && (
               <HostDashboard onConnect={handleConnectServer} onConnectSftp={handleConnectSftp} />
             )}
-            {showRightPanel && showHosts && (
-              <div className="absolute inset-y-0 right-0" style={{ zIndex: 20 }}>
-                <HostForm onConnect={handleConnectServer} />
-              </div>
+            {showHosts && (
+              rightPanel
+                ? <HostForm onConnect={handleConnectServer} />
+                : <EmptyHostPanel />
             )}
 
             {/* Terminal sessions — SEMPRE no DOM quando há tabs, só esconde visualmente.

@@ -33,10 +33,10 @@ export default function TabBar({ onCloseTab, onNewTab, onToggleSftp, onConnectSe
   return (
     <>
       <div
-        className="flex items-center overflow-x-auto"
+        className="flex items-center overflow-x-auto cs-glass"
         style={{
           background: 'var(--tabbar-bg)',
-          borderBottom: '1px solid var(--border)',
+          borderBottom: '1px solid var(--glass-border)',
           height: 46,
           minHeight: 46
         }}
@@ -72,12 +72,13 @@ export default function TabBar({ onCloseTab, onNewTab, onToggleSftp, onConnectSe
         {/* Context menu */}
         {ctxMenu && ctxTab && (
           <div
-            className="fixed z-50 rounded-lg py-1 shadow-2xl animate-fade-in"
+            className="fixed z-50 rounded-lg py-1 animate-fade-in cs-glass-strong"
             style={{
               left: ctxMenu.x,
               top: ctxMenu.y,
               background: 'var(--bg-elevated)',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--glass-border)',
+              boxShadow: 'var(--glass-shadow)',
               minWidth: 180
             }}
             onClick={(e) => e.stopPropagation()}
@@ -165,14 +166,15 @@ function ServerPickerModal({ activeServerId, onSelect, onClose }: {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.55)' }}
+      style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}
       onClick={onClose}
     >
       <div
-        className="flex flex-col rounded-xl shadow-2xl animate-fade-in"
+        className="flex flex-col rounded-xl animate-fade-in cs-glass-strong"
         style={{
           background: 'var(--bg-elevated)',
-          border: '1px solid var(--border)',
+          border: '1px solid var(--glass-border)',
+          boxShadow: 'var(--glass-shadow)',
           width: 420,
           maxHeight: '72vh'
         }}

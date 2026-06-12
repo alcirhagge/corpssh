@@ -62,6 +62,10 @@ export interface AppSettings {
   cursorBlink: boolean
   scrollback: number
   bellStyle: 'none' | 'sound' | 'visual'
+  /** Optional override for the terminal text color. Empty/undefined = use theme. */
+  terminalFgColor?: string
+  /** Auto-enable ls/grep/ip colors on connect for Linux hosts. Default true. */
+  terminalAutoColor?: boolean
   remoteLogConfig?: RemoteLogConfig
 }
 

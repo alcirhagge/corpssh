@@ -17,8 +17,8 @@ export default function Sidebar() {
 
   return (
     <div
-      className="flex flex-col h-full select-none"
-      style={{ width: 168, background: 'var(--sidebar-bg)', borderRight: '1px solid var(--border-subtle)', flexShrink: 0 }}
+      className="flex flex-col h-full select-none cs-glass"
+      style={{ width: 168, background: 'var(--sidebar-bg)', borderRight: '1px solid var(--glass-border)', flexShrink: 0 }}
     >
       {/* Nav */}
       <div className="flex flex-col gap-0.5 p-2 flex-1">

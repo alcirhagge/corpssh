@@ -57,7 +57,8 @@ const defaultSettings: AppSettings = {
   cursorStyle: 'block',
   cursorBlink: true,
   scrollback: 5000,
-  bellStyle: 'none'
+  bellStyle: 'none',
+  terminalAutoColor: true
 }
 
 export const useAppStore = create<AppState>((set) => ({

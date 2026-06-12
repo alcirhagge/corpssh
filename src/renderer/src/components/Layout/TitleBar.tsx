@@ -39,8 +39,8 @@ export default function TitleBar() {
 
   return (
     <div
-      className="flex items-center justify-between px-3 select-none drag"
-      style={{ background: 'var(--titlebar-bg)', borderBottom: '1px solid var(--border-subtle)', height: 52 }}
+      className="flex items-center justify-between px-3 select-none drag cs-glass"
+      style={{ background: 'var(--titlebar-bg)', borderBottom: '1px solid var(--glass-border)', height: 52, position: 'relative', zIndex: 40 }}
     >
       {/* Left: Logo */}
       <div className="flex items-center gap-2.5 no-drag">
@@ -52,12 +52,7 @@ export default function TitleBar() {
             letterSpacing: '-0.03em',
             color: 'var(--text-primary)'
           }}>
-            Corp<span style={{
-              background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text'
-            }}>SSH</span>
+            Corp<span style={{ color: 'var(--accent)' }}>SSH</span>
           </span>
         </div>
       </div>
@@ -85,8 +80,8 @@ export default function TitleBar() {
 
           {pickerOpen && (
             <div
-              className="absolute right-0 top-8 z-50 p-2 rounded-xl shadow-2xl animate-fade-in"
-              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', width: 200 }}
+              className="absolute right-0 top-8 z-50 p-2 rounded-xl animate-fade-in cs-glass-strong"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', width: 200 }}
             >
               <p className="text-xs font-semibold px-1 pb-1.5 mb-1" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)' }}>
                 Dark
@@ -141,11 +136,11 @@ function ThemeSwatch({ theme, active, onClick }: { theme: typeof THEMES[0]; acti
       }}
     >
       <div className="rounded-md overflow-hidden flex-shrink-0"
-        style={{ width: 44, height: 30, background: theme.bg, position: 'relative', border: '1px solid rgba(128,128,128,0.2)' }}>
-        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 10, background: theme.surface }} />
-        <div style={{ position: 'absolute', right: 6, top: 6, width: 8, height: 8, borderRadius: 2, background: theme.accent }} />
-        <div style={{ position: 'absolute', left: 13, top: 8, width: 20, height: 3, borderRadius: 2, background: theme.text, opacity: 0.4 }} />
-        <div style={{ position: 'absolute', left: 13, top: 14, width: 14, height: 3, borderRadius: 2, background: theme.text, opacity: 0.2 }} />
+        style={{ width: 44, height: 30, background: `linear-gradient(140deg, ${theme.accent} 0%, ${theme.surface} 52%, ${theme.bg} 100%)`, position: 'relative', border: '1px solid rgba(255,255,255,0.22)' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 10, background: theme.surface, opacity: 0.85 }} />
+        <div style={{ position: 'absolute', right: 5, bottom: 5, width: 9, height: 9, borderRadius: '50%', background: theme.accent, boxShadow: `0 0 6px ${theme.accent}` }} />
+        <div style={{ position: 'absolute', left: 13, top: 9, width: 20, height: 3, borderRadius: 2, background: theme.text, opacity: 0.45 }} />
+        <div style={{ position: 'absolute', left: 13, top: 15, width: 14, height: 3, borderRadius: 2, background: theme.text, opacity: 0.25 }} />
       </div>
       <span style={{ fontSize: 10, color: active ? 'var(--accent)' : 'var(--text-secondary)', fontWeight: active ? 600 : 400 }}>
         {theme.name}
@@ -159,8 +154,8 @@ function CorpSSHLogo({ size = 28 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="csg-bg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#2563eb"/>
-          <stop offset="100%" stopColor="#1e40af"/>
+          <stop offset="0%" stopColor="var(--accent-hover)"/>
+          <stop offset="100%" stopColor="var(--accent)"/>
         </linearGradient>
         <linearGradient id="csg-shine" x1="0" y1="0" x2="0" y2="16" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stopColor="white" stopOpacity="0.18"/>

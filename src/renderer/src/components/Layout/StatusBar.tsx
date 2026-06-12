@@ -10,11 +10,11 @@ export default function StatusBar() {
 
   return (
     <div
-      className="flex items-center justify-between px-4 text-xs select-none"
+      className="flex items-center justify-between px-4 text-xs select-none cs-glass"
       style={{
         height: 26,
         background: 'var(--bg-elevated)',
-        borderTop: '1px solid var(--border-subtle)',
+        borderTop: '1px solid var(--glass-border)',
         color: 'var(--text-muted)'
       }}
     >

@@ -227,26 +227,10 @@ function getInitials(name: string): string {
     .join('')
 }
 
-const PANEL_WIDTH = 284  // HostForm width + border
-const CARD_MIN   = 260  // minimum card width
-const GRID_GAP   =  12  // gap-3 = 12px
-const GRID_PAD   =  32  // padding 16px each side
-
 export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboardProps) {
-  const { servers, groups, setGroups, setRightPanel, rightPanel, upsertGroup, removeServer, removeGroup, activePage } = useAppStore()
+  const { servers, groups, setGroups, setRightPanel, upsertGroup, removeServer, removeGroup } = useAppStore()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [search, setSearch] = useState('')
-
-  const panelOpen = rightPanel !== null
-
-  // Force re-render on window resize so the grid recalculates
-  const [, setResizeTick] = useState(0)
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>
-    const onResize = () => { clearTimeout(timer); timer = setTimeout(() => setResizeTick(t => t + 1), 150) }
-    window.addEventListener('resize', onResize)
-    return () => { window.removeEventListener('resize', onResize); clearTimeout(timer) }
-  }, [])
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = savedScrollTop
@@ -353,19 +337,6 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
     setDragOverGroupId(null)
   }
 
-  // Compute card minWidth directly in render — no timing/state issues.
-  // When panel open: find N (cols that fit full width), then compute the minWidth
-  // that fits exactly N cols in the reduced space. Subtract 1px safety margin.
-  let gridCols: number | undefined
-  let scrollPadRight = 16
-  if (panelOpen && scrollRef.current) {
-    const w = scrollRef.current.offsetWidth
-    const N = Math.max(1, Math.floor((w - GRID_PAD + GRID_GAP) / (CARD_MIN + GRID_GAP)))
-    const reducedW = w - PANEL_WIDTH - 16
-    gridCols = Math.max(80, Math.floor((reducedW - (N - 1) * GRID_GAP) / N) - 1)
-    scrollPadRight = PANEL_WIDTH
-  }
-
   return (
     <div
       className="flex flex-col flex-1 overflow-hidden"
@@ -374,8 +345,8 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
     >
       {/* Toolbar */}
       <div
-        className="flex items-center gap-2 px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}
+        className="flex items-center gap-2 px-4 py-3 flex-shrink-0 cs-glass"
+        style={{ borderBottom: '1px solid var(--glass-border)', background: 'var(--bg-surface)' }}
       >
         {/* Search */}
         <div className="relative flex-1">
@@ -450,7 +421,7 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto"
-        style={{ padding: 16, paddingRight: scrollPadRight }}
+        style={{ padding: 16 }}
         onScroll={(e) => { savedScrollTop = (e.currentTarget as HTMLDivElement).scrollTop }}
       >
         {servers.length === 0 && !search ? (
@@ -503,7 +474,6 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
                     <HostGrid
                       servers={items}
                       viewMode={viewMode}
-                      gridCols={gridCols}
                       onConnect={onConnect}
                       onConnectSftp={onConnectSftp}
                       onEdit={(s) => setRightPanel({ mode: 'edit', server: s })}
@@ -528,7 +498,6 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
                   <HostGrid
                     servers={items}
                     viewMode={viewMode}
-                    gridCols={gridCols}
                     onConnect={onConnect}
                     onConnectSftp={onConnectSftp}
                     onEdit={(s) => setRightPanel({ mode: 'edit', server: s })}
@@ -734,11 +703,11 @@ function HostCard({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen
 
   return (
     <div
-      className="relative rounded-xl cursor-pointer overflow-hidden"
+      className="relative rounded-xl cursor-pointer overflow-hidden cs-glass"
       style={{
         background: hovered ? 'var(--bg-elevated)' : 'var(--bg-card)',
-        border: `1px solid ${hovered ? color + '55' : 'var(--border)'}`,
-        boxShadow: hovered ? `0 4px 20px rgba(0,0,0,0.25), 0 0 0 1px ${color}22` : '0 1px 4px rgba(0,0,0,0.15)',
+        border: `1px solid ${hovered ? color + '66' : 'var(--glass-border)'}`,
+        boxShadow: hovered ? `0 8px 28px rgba(0,0,0,0.28), 0 0 0 1px ${color}33` : 'var(--glass-shadow)',
         transition: 'all 0.18s ease'
       }}
       onMouseEnter={() => setHovered(true)}
@@ -849,10 +818,10 @@ function HostRow({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen,
 
   return (
     <div
-      className="relative flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer"
+      className="relative flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer cs-glass"
       style={{
         background: hovered ? 'var(--bg-elevated)' : 'var(--bg-card)',
-        border: `1px solid ${hovered ? 'var(--accent)' : 'var(--border)'}`,
+        border: `1px solid ${hovered ? 'var(--accent)' : 'var(--glass-border)'}`,
         transition: 'all 0.12s'
       }}
       onMouseEnter={() => setHovered(true)}
@@ -942,8 +911,8 @@ function DropMenu({ items, onClose }: {
 }) {
   return (
     <div
-      className="absolute right-0 top-7 z-50 rounded-lg py-1 shadow-xl animate-fade-in"
-      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', minWidth: 140 }}
+      className="absolute right-0 top-7 z-50 rounded-lg py-1 animate-fade-in cs-glass-strong"
+      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', minWidth: 140 }}
       onClick={(e) => e.stopPropagation()}
     >
       {items.map((item) => (

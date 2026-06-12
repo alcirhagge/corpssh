@@ -17,6 +17,18 @@ interface TerminalPaneProps {
   onClose: () => void
 }
 
+// OSes where it's safe to send bash color aliases on connect (NOT network gear).
+const LINUX_OS = new Set([
+  'ubuntu', 'debian', 'centos', 'fedora', 'rhel', 'arch',
+  'alpine', 'suse', 'linux', 'freebsd', 'raspberrypi'
+])
+
+// Leading space keeps it out of history (HISTCONTROL=ignorespace); the trailing
+// `clear` wipes the echoed aliases so the session opens on a clean prompt.
+const COLOR_PRELUDE =
+  " alias ls='ls --color=auto' 2>/dev/null; alias grep='grep --color=auto' 2>/dev/null;" +
+  " command ip -c -V >/dev/null 2>&1 && alias ip='ip -c'; clear\n"
+
 export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
@@ -39,30 +51,33 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
     const s = getComputedStyle(document.documentElement)
     const v = (name: string, fallback: string) => s.getPropertyValue(name).trim() || fallback
     const isDark = document.documentElement.classList.contains('dark')
+    const fgOverride = settings.terminalFgColor?.trim()
     return {
       background:          v('--terminal-bg',        isDark ? '#0e0f18' : '#ffffff'),
-      foreground:          v('--terminal-fg',        isDark ? '#c8cad8' : '#1e2040'),
+      foreground:          fgOverride || v('--terminal-fg', isDark ? '#c8cad8' : '#1e2040'),
       cursor:              v('--terminal-cursor',    isDark ? '#4c74ff' : '#2952cc'),
       cursorAccent:        v('--terminal-bg',        isDark ? '#0e0f18' : '#ffffff'),
       selectionBackground: v('--terminal-selection', isDark ? 'rgba(76,116,255,0.3)' : 'rgba(41,82,204,0.2)'),
-      black:         isDark ? '#484f58' : '#24292f',
-      red:           isDark ? '#f85149' : '#cf222e',
-      green:         isDark ? '#3fb950' : '#1a7f37',
-      yellow:        isDark ? '#d29922' : '#9a6700',
-      blue:          isDark ? '#58a6ff' : '#0969da',
-      magenta:       isDark ? '#bc8cff' : '#8250df',
-      cyan:          isDark ? '#39c5cf' : '#0969da',
-      white:         isDark ? '#b1bac4' : '#6e7781',
-      brightBlack:   isDark ? '#6e7681' : '#57606a',
-      brightRed:     isDark ? '#ff7b72' : '#a40e26',
-      brightGreen:   isDark ? '#56d364' : '#2da44e',
-      brightYellow:  isDark ? '#e3b341' : '#bf8700',
-      brightBlue:    isDark ? '#79c0ff' : '#218bff',
-      brightMagenta: isDark ? '#d2a8ff' : '#a475f9',
-      brightCyan:    isDark ? '#56d4dd' : '#1b7c83',
-      brightWhite:   isDark ? '#cdd9e5' : '#ffffff',
+      // Vibrant, distinct ANSI palette so colorized output (ls, grep, git…)
+      // reads clearly while still feeling at home in the theme.
+      black:         isDark ? '#5b6273' : '#24292f',
+      red:           isDark ? '#ff6e6e' : '#cf222e',
+      green:         isDark ? '#5af78e' : '#1a7f37',
+      yellow:        isDark ? '#f4f99d' : '#9a6700',
+      blue:          isDark ? '#6ab0ff' : '#0969da',
+      magenta:       isDark ? '#ff7ac6' : '#8250df',
+      cyan:          isDark ? '#8be9fd' : '#1b7c83',
+      white:         isDark ? '#c5cdd9' : '#6e7781',
+      brightBlack:   isDark ? '#7b8496' : '#57606a',
+      brightRed:     isDark ? '#ff8f8f' : '#a40e26',
+      brightGreen:   isDark ? '#76ffa0' : '#2da44e',
+      brightYellow:  isDark ? '#ffffa5' : '#bf8700',
+      brightBlue:    isDark ? '#88bbff' : '#218bff',
+      brightMagenta: isDark ? '#ff9cd6' : '#a475f9',
+      brightCyan:    isDark ? '#a4ffff' : '#1b7c83',
+      brightWhite:   isDark ? '#ffffff' : '#1e2040',
     }
-  }, [])
+  }, [settings.terminalFgColor, settings.themeId])
 
   useEffect(() => {
     if (!containerRef.current || !tab.sessionId) return
@@ -187,6 +202,14 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
       const rows = terminal.rows || 24
       shellOpened = true
       window.api.ssh.shell(tab.sessionId!, cols, rows)
+        .then(() => {
+          // Auto-enable ls/grep/ip colors on Linux hosts (uses the detected OS,
+          // so it never runs on switches / OLTs / MikroTik).
+          const srv = useAppStore.getState().servers.find((s) => s.id === tab.serverId)
+          if (settings.terminalAutoColor !== false && srv?.detectedOs && LINUX_OS.has(srv.detectedOs)) {
+            window.api.ssh.input(tab.sessionId!, COLOR_PRELUDE)
+          }
+        })
         .catch((err: any) => {
           terminal.write(`\r\n\x1b[31m[Error opening shell: ${err?.message ?? err}]\x1b[0m\r\n`)
         })
@@ -204,6 +227,15 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
       terminalRef.current = null
     }
   }, [tab.sessionId])
+
+  // Live-apply theme / terminal-color changes to an already-open terminal,
+  // so switching themes or picking a new text color updates without reconnecting.
+  useEffect(() => {
+    const term = terminalRef.current
+    if (!term) return
+    term.options.theme = getTheme()
+    term.refresh(0, term.rows - 1)
+  }, [getTheme])
 
   // Refit + focus when tab becomes active OR when terminal page becomes visible
   useEffect(() => {

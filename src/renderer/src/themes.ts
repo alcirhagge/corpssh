@@ -1,8 +1,18 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Theme system — glassmorphism edition.
+//
+// Each theme is declared as a compact *seed* and expanded into the full set of
+// CSS custom properties by `expand()`. Surfaces are translucent (rgba) so the
+// aurora background painted behind the whole app (see globals.css) bleeds
+// through every panel, sidebar, card and modal — that's what makes the active
+// theme feel present everywhere instead of "only the terminal".
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface ThemeDef {
   id: string
   name: string
   base: 'dark' | 'light'
-  // For swatch previews
+  // Swatch preview colors
   bg: string
   surface: string
   accent: string
@@ -10,134 +20,186 @@ export interface ThemeDef {
   vars: Record<string, string>
 }
 
-export const THEMES: ThemeDef[] = [
+interface ThemeSeed {
+  id: string
+  name: string
+  base: 'dark' | 'light'
+  appBase: string                 // solid color painted behind the aurora
+  aurora: [string, string, string]// three translucent aurora blobs
+  accent: string
+  accentHover: string
+  text: [string, string, string]  // primary, secondary, muted
+  surfaceTint: string             // "r, g, b" the frosted glass is tinted with
+  success: string
+  warning: string
+  error: string
+  purple: string
+  orange: string
+  terminalBg: string
+  terminalFg: string
+  // swatch helpers
+  swatchSurface: string
+}
+
+function hexToRgb(hex: string): string {
+  const h = hex.replace('#', '')
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h
+  const n = parseInt(full, 16)
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`
+}
+
+function expand(s: ThemeSeed): Record<string, string> {
+  const dark = s.base === 'dark'
+  const tint = s.surfaceTint
+  const accentRgb = hexToRgb(s.accent)
+
+  // Surface alpha levels (frosted glass over the aurora)
+  const a = dark
+    ? { titlebar: 0.74, sidebar: 0.60, tabbar: 0.56, surface: 0.62, elevated: 0.80, card: 0.58, input: 0.64 }
+    : { titlebar: 0.66, sidebar: 0.58, tabbar: 0.52, surface: 0.64, elevated: 0.80, card: 0.62, input: 0.72 }
+
+  // Hover / active / border overlays — light surfaces use dark overlays and vice-versa
+  const ov = dark
+    ? { hover: 'rgba(255,255,255,0.055)', active: 'rgba(255,255,255,0.10)', border: 'rgba(255,255,255,0.10)', borderSubtle: 'rgba(255,255,255,0.055)', thumb: 'rgba(255,255,255,0.13)', thumbHover: 'rgba(255,255,255,0.22)' }
+    : { hover: 'rgba(0,0,0,0.04)', active: 'rgba(0,0,0,0.07)', border: 'rgba(0,0,0,0.10)', borderSubtle: 'rgba(0,0,0,0.05)', thumb: 'rgba(0,0,0,0.14)', thumbHover: 'rgba(0,0,0,0.24)' }
+
+  const subtleA = dark ? 0.16 : 0.12
+  const sub = (hex: string, alpha = 0.14) => `rgba(${hexToRgb(hex)}, ${alpha})`
+
+  return {
+    '--bg-app': 'transparent',
+    '--bg-app-base': s.appBase,
+    '--aurora-1': s.aurora[0],
+    '--aurora-2': s.aurora[1],
+    '--aurora-3': s.aurora[2],
+
+    '--bg-surface': `rgba(${tint}, ${a.surface})`,
+    '--bg-elevated': `rgba(${tint}, ${a.elevated})`,
+    '--bg-card': `rgba(${tint}, ${a.card})`,
+    '--bg-input': `rgba(${tint}, ${a.input})`,
+    '--bg-hover': ov.hover,
+    '--bg-active': ov.active,
+    '--border': ov.border,
+    '--border-subtle': ov.borderSubtle,
+
+    '--titlebar-bg': `rgba(${tint}, ${a.titlebar})`,
+    '--sidebar-bg': `rgba(${tint}, ${a.sidebar})`,
+    '--tabbar-bg': `rgba(${tint}, ${a.tabbar})`,
+
+    '--text-primary': s.text[0],
+    '--text-secondary': s.text[1],
+    '--text-muted': s.text[2],
+    '--text-link': s.accent,
+
+    '--accent': s.accent,
+    '--accent-hover': s.accentHover,
+    '--accent-rgb': accentRgb,
+    '--accent-subtle': `rgba(${accentRgb}, ${subtleA})`,
+
+    '--success': s.success, '--success-subtle': sub(s.success),
+    '--warning': s.warning, '--warning-subtle': sub(s.warning),
+    '--error': s.error, '--error-subtle': sub(s.error),
+    '--purple': s.purple, '--purple-subtle': sub(s.purple),
+    '--orange': s.orange,
+
+    '--scrollbar-track': 'transparent',
+    '--scrollbar-thumb': ov.thumb,
+    '--scrollbar-thumb-hover': ov.thumbHover,
+
+    // Glassmorphism primitives consumed by globals.css + components
+    '--glass-blur': 'blur(20px) saturate(150%)',
+    '--glass-blur-strong': 'blur(34px) saturate(160%)',
+    '--glass-border': dark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.55)',
+    '--glass-highlight': dark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.40)',
+    '--glass-shadow': dark ? '0 8px 32px rgba(0,0,0,0.42)' : '0 8px 32px rgba(60,70,120,0.16)',
+
+    // Terminal — kept opaque for readability + WebGL perf; user can override fg.
+    '--terminal-bg': s.terminalBg,
+    '--terminal-fg': s.terminalFg,
+    '--terminal-cursor': s.accent,
+    '--terminal-selection': `rgba(${accentRgb}, 0.3)`,
+  }
+}
+
+const SEEDS: ThemeSeed[] = [
   {
     id: 'navy', name: 'Navy', base: 'dark',
-    bg: '#13141e', surface: '#1e2137', accent: '#4c74ff', text: '#c8cad8',
-    vars: {
-      '--bg-app': '#13141e', '--bg-surface': '#191c2a', '--bg-elevated': '#1e2137',
-      '--bg-card': '#1e2137', '--bg-input': '#181b28', '--bg-hover': '#21253b',
-      '--bg-active': '#272c44', '--border': '#282c43', '--border-subtle': '#1c1f31',
-      '--text-primary': '#c8cad8', '--text-secondary': '#7b80a0', '--text-muted': '#42476a',
-      '--text-link': '#4c74ff', '--accent': '#4c74ff', '--accent-hover': '#6688ff',
-      '--accent-subtle': 'rgba(76,116,255,0.15)',
-      '--success': '#30d48a', '--success-subtle': 'rgba(48,212,138,0.12)',
-      '--warning': '#f7b731', '--warning-subtle': 'rgba(247,183,49,0.12)',
-      '--error': '#ff5757', '--error-subtle': 'rgba(255,87,87,0.12)',
-      '--purple': '#a77bff', '--purple-subtle': 'rgba(167,123,255,0.12)',
-      '--orange': '#ff8c42',
-      '--titlebar-bg': '#0e0f18', '--sidebar-bg': '#191c2a', '--tabbar-bg': '#13141e',
-      '--scrollbar-thumb': '#282c43', '--scrollbar-thumb-hover': '#363b58',
-      '--terminal-bg': '#0e0f18', '--terminal-fg': '#c8cad8',
-      '--terminal-cursor': '#4c74ff', '--terminal-selection': 'rgba(76,116,255,0.3)',
-    }
+    appBase: '#070810',
+    aurora: ['rgba(76,116,255,0.16)', 'rgba(120,90,255,0.13)', 'rgba(40,90,200,0.12)'],
+    accent: '#4c74ff', accentHover: '#6688ff',
+    text: ['#d2d4e4', '#8388a8', '#4a4f74'],
+    surfaceTint: '26, 30, 52',
+    success: '#30d48a', warning: '#f7b731', error: '#ff5757', purple: '#a77bff', orange: '#ff8c42',
+    terminalBg: '#0a0b12', terminalFg: '#aeb9ea',
+    swatchSurface: '#1e2137',
   },
   {
     id: 'noir', name: 'Noir', base: 'dark',
-    bg: '#0e0909', surface: '#1c1010', accent: '#e84040', text: '#d8c8c8',
-    vars: {
-      '--bg-app': '#0e0909', '--bg-surface': '#150c0c', '--bg-elevated': '#1c1010',
-      '--bg-card': '#1c1010', '--bg-input': '#130a0a', '--bg-hover': '#211212',
-      '--bg-active': '#2a1515', '--border': '#2d1515', '--border-subtle': '#1e0e0e',
-      '--text-primary': '#d8c8c8', '--text-secondary': '#9a7070', '--text-muted': '#5a3838',
-      '--text-link': '#ff5555', '--accent': '#e84040', '--accent-hover': '#ff5555',
-      '--accent-subtle': 'rgba(232,64,64,0.15)',
-      '--success': '#40d48a', '--success-subtle': 'rgba(64,212,138,0.12)',
-      '--warning': '#f7b731', '--warning-subtle': 'rgba(247,183,49,0.12)',
-      '--error': '#ff7070', '--error-subtle': 'rgba(255,112,112,0.12)',
-      '--purple': '#c87bff', '--purple-subtle': 'rgba(200,123,255,0.12)',
-      '--orange': '#ff7042',
-      '--titlebar-bg': '#090606', '--sidebar-bg': '#150c0c', '--tabbar-bg': '#0e0909',
-      '--scrollbar-thumb': '#2d1515', '--scrollbar-thumb-hover': '#401d1d',
-      '--terminal-bg': '#090606', '--terminal-fg': '#d8c8c8',
-      '--terminal-cursor': '#e84040', '--terminal-selection': 'rgba(232,64,64,0.3)',
-    }
+    appBase: '#090505',
+    aurora: ['rgba(232,64,64,0.16)', 'rgba(180,40,60,0.13)', 'rgba(120,20,20,0.12)'],
+    accent: '#e84040', accentHover: '#ff5555',
+    text: ['#e0d2d2', '#a87a7a', '#6a4444'],
+    surfaceTint: '40, 22, 22',
+    success: '#40d48a', warning: '#f7b731', error: '#ff7070', purple: '#c87bff', orange: '#ff7042',
+    terminalBg: '#0a0606', terminalFg: '#ecb4b4',
+    swatchSurface: '#1c1010',
   },
   {
     id: 'matrix', name: 'Matrix', base: 'dark',
-    bg: '#080e08', surface: '#111811', accent: '#00d068', text: '#c0d8c0',
-    vars: {
-      '--bg-app': '#080e08', '--bg-surface': '#0c130c', '--bg-elevated': '#111811',
-      '--bg-card': '#111811', '--bg-input': '#0a1009', '--bg-hover': '#151f15',
-      '--bg-active': '#1a271a', '--border': '#1e2e1e', '--border-subtle': '#121a12',
-      '--text-primary': '#c0d8c0', '--text-secondary': '#6a9a6a', '--text-muted': '#3a5a3a',
-      '--text-link': '#00e878', '--accent': '#00d068', '--accent-hover': '#00f07a',
-      '--accent-subtle': 'rgba(0,208,104,0.15)',
-      '--success': '#00e878', '--success-subtle': 'rgba(0,232,120,0.12)',
-      '--warning': '#e8c040', '--warning-subtle': 'rgba(232,192,64,0.12)',
-      '--error': '#ff5555', '--error-subtle': 'rgba(255,85,85,0.12)',
-      '--purple': '#78ff78', '--purple-subtle': 'rgba(120,255,120,0.12)',
-      '--orange': '#70d050',
-      '--titlebar-bg': '#050a05', '--sidebar-bg': '#0c130c', '--tabbar-bg': '#080e08',
-      '--scrollbar-thumb': '#1e2e1e', '--scrollbar-thumb-hover': '#2a3e2a',
-      '--terminal-bg': '#050a05', '--terminal-fg': '#c0d8c0',
-      '--terminal-cursor': '#00e878', '--terminal-selection': 'rgba(0,208,104,0.3)',
-    }
+    appBase: '#050805',
+    aurora: ['rgba(0,208,104,0.15)', 'rgba(40,200,120,0.12)', 'rgba(0,120,60,0.12)'],
+    accent: '#00d068', accentHover: '#00f07a',
+    text: ['#c4dcc4', '#6fa66f', '#3d5f3d'],
+    surfaceTint: '18, 34, 18',
+    success: '#00e878', warning: '#e8c040', error: '#ff5555', purple: '#78ff78', orange: '#70d050',
+    terminalBg: '#050a05', terminalFg: '#74e88a',
+    swatchSurface: '#111811',
   },
   {
     id: 'clean', name: 'Clean', base: 'light',
-    bg: '#f0f2f8', surface: '#ffffff', accent: '#2952cc', text: '#1e2040',
-    vars: {
-      '--bg-app': '#f0f2f8', '--bg-surface': '#ffffff', '--bg-elevated': '#f5f7fc',
-      '--bg-card': '#ffffff', '--bg-input': '#f0f2f8', '--bg-hover': '#eaecf4',
-      '--bg-active': '#e2e5f0', '--border': '#d4d8ec', '--border-subtle': '#eaecf4',
-      '--text-primary': '#1e2040', '--text-secondary': '#606480', '--text-muted': '#9ea3bc',
-      '--text-link': '#2952cc', '--accent': '#2952cc', '--accent-hover': '#3d66e8',
-      '--accent-subtle': 'rgba(41,82,204,0.1)',
-      '--success': '#1db87a', '--success-subtle': 'rgba(29,184,122,0.1)',
-      '--warning': '#d49a0a', '--warning-subtle': 'rgba(212,154,10,0.1)',
-      '--error': '#e53535', '--error-subtle': 'rgba(229,53,53,0.1)',
-      '--purple': '#7c52d9', '--purple-subtle': 'rgba(124,82,217,0.1)',
-      '--orange': '#d96e28',
-      '--titlebar-bg': '#e8ebf6', '--sidebar-bg': '#eceef8', '--tabbar-bg': '#f0f2f8',
-      '--scrollbar-thumb': '#d4d8ec', '--scrollbar-thumb-hover': '#b8bdd8',
-      '--terminal-bg': '#ffffff', '--terminal-fg': '#1e2040',
-      '--terminal-cursor': '#2952cc', '--terminal-selection': 'rgba(41,82,204,0.2)',
-    }
+    appBase: '#eef1f9',
+    aurora: ['rgba(41,82,204,0.24)', 'rgba(120,90,230,0.20)', 'rgba(80,140,255,0.22)'],
+    accent: '#2952cc', accentHover: '#3d66e8',
+    text: ['#1e2040', '#5a6080', '#9398b6'],
+    surfaceTint: '255, 255, 255',
+    success: '#1db87a', warning: '#d49a0a', error: '#e53535', purple: '#7c52d9', orange: '#d96e28',
+    terminalBg: '#ffffff', terminalFg: '#1e2040',
+    swatchSurface: '#ffffff',
   },
   {
     id: 'warm', name: 'Warm', base: 'light',
-    bg: '#f5f0e8', surface: '#fdfaf4', accent: '#c46a00', text: '#2d1a06',
-    vars: {
-      '--bg-app': '#f5f0e8', '--bg-surface': '#fdfaf4', '--bg-elevated': '#ede6d6',
-      '--bg-card': '#fdfaf4', '--bg-input': '#f0ead8', '--bg-hover': '#e8e0cc',
-      '--bg-active': '#ddd5c0', '--border': '#c8bfa8', '--border-subtle': '#e0d8c4',
-      '--text-primary': '#2d1a06', '--text-secondary': '#7a5c30', '--text-muted': '#a89060',
-      '--text-link': '#b85c00', '--accent': '#c46a00', '--accent-hover': '#e07800',
-      '--accent-subtle': 'rgba(196,106,0,0.12)',
-      '--success': '#2a9a5a', '--success-subtle': 'rgba(42,154,90,0.12)',
-      '--warning': '#c87800', '--warning-subtle': 'rgba(200,120,0,0.12)',
-      '--error': '#cc3333', '--error-subtle': 'rgba(204,51,51,0.12)',
-      '--purple': '#8844aa', '--purple-subtle': 'rgba(136,68,170,0.12)',
-      '--orange': '#e06000',
-      '--titlebar-bg': '#ece4d2', '--sidebar-bg': '#ede6d6', '--tabbar-bg': '#f5f0e8',
-      '--scrollbar-thumb': '#c8bfa8', '--scrollbar-thumb-hover': '#b0a490',
-      '--terminal-bg': '#fdfaf4', '--terminal-fg': '#2d1a06',
-      '--terminal-cursor': '#c46a00', '--terminal-selection': 'rgba(196,106,0,0.2)',
-    }
+    appBase: '#f6f1e8',
+    aurora: ['rgba(196,106,0,0.24)', 'rgba(220,150,40,0.20)', 'rgba(180,80,20,0.18)'],
+    accent: '#c46a00', accentHover: '#e07800',
+    text: ['#2d1a06', '#7a5c30', '#a89060'],
+    surfaceTint: '255, 252, 246',
+    success: '#2a9a5a', warning: '#c87800', error: '#cc3333', purple: '#8844aa', orange: '#e06000',
+    terminalBg: '#fdfaf4', terminalFg: '#2d1a06',
+    swatchSurface: '#fdfaf4',
   },
   {
     id: 'violet', name: 'Violet', base: 'light',
-    bg: '#f0ecfa', surface: '#faf8ff', accent: '#6628cc', text: '#1a0a3a',
-    vars: {
-      '--bg-app': '#f0ecfa', '--bg-surface': '#faf8ff', '--bg-elevated': '#e8e0f8',
-      '--bg-card': '#faf8ff', '--bg-input': '#ede8f8', '--bg-hover': '#e4ddf5',
-      '--bg-active': '#d8d0ee', '--border': '#c0b4e0', '--border-subtle': '#e4ddf5',
-      '--text-primary': '#1a0a3a', '--text-secondary': '#5e4480', '--text-muted': '#9080b0',
-      '--text-link': '#6628cc', '--accent': '#6628cc', '--accent-hover': '#7a3ae0',
-      '--accent-subtle': 'rgba(102,40,204,0.12)',
-      '--success': '#1a9a6a', '--success-subtle': 'rgba(26,154,106,0.12)',
-      '--warning': '#b07800', '--warning-subtle': 'rgba(176,120,0,0.12)',
-      '--error': '#cc2244', '--error-subtle': 'rgba(204,34,68,0.12)',
-      '--purple': '#6628cc', '--purple-subtle': 'rgba(102,40,204,0.12)',
-      '--orange': '#c05020',
-      '--titlebar-bg': '#e6dffa', '--sidebar-bg': '#e8e0f8', '--tabbar-bg': '#f0ecfa',
-      '--scrollbar-thumb': '#c0b4e0', '--scrollbar-thumb-hover': '#a898cc',
-      '--terminal-bg': '#faf8ff', '--terminal-fg': '#1a0a3a',
-      '--terminal-cursor': '#6628cc', '--terminal-selection': 'rgba(102,40,204,0.2)',
-    }
+    appBase: '#f1ecfa',
+    aurora: ['rgba(102,40,204,0.24)', 'rgba(150,80,230,0.20)', 'rgba(80,40,180,0.20)'],
+    accent: '#6628cc', accentHover: '#7a3ae0',
+    text: ['#1a0a3a', '#5e4480', '#9080b0'],
+    surfaceTint: '252, 250, 255',
+    success: '#1a9a6a', warning: '#b07800', error: '#cc2244', purple: '#6628cc', orange: '#c05020',
+    terminalBg: '#faf8ff', terminalFg: '#1a0a3a',
+    swatchSurface: '#faf8ff',
   },
 ]
+
+export const THEMES: ThemeDef[] = SEEDS.map((s) => ({
+  id: s.id,
+  name: s.name,
+  base: s.base,
+  bg: s.appBase,
+  surface: s.swatchSurface,
+  accent: s.accent,
+  text: s.text[0],
+  vars: expand(s),
+}))
 
 export function getThemeBase(themeId: string): 'dark' | 'light' {
   return THEMES.find((t) => t.id === themeId)?.base ?? 'dark'
@@ -145,19 +207,20 @@ export function getThemeBase(themeId: string): 'dark' | 'light' {
 
 export function applyTheme(themeId: string): void {
   const theme = THEMES.find((t) => t.id === themeId) ?? THEMES[0]
-  document.documentElement.setAttribute('data-theme', themeId)
-  document.documentElement.classList.remove('dark', 'light')
-  document.documentElement.classList.add(theme.base)
+  const root = document.documentElement
+  root.setAttribute('data-theme', themeId)
+  root.classList.remove('dark', 'light')
+  root.classList.add(theme.base)
 
-  // Inject a <style> tag appended to <head> so it comes after globals.css in
-  // document order. Rules with equal specificity (:root) that appear later win,
-  // so this reliably overrides any :root / .dark definition in the stylesheet.
-  let el = document.getElementById('cs-theme') as HTMLStyleElement | null
-  if (!el) {
-    el = document.createElement('style')
-    el.id = 'cs-theme'
-    document.head.appendChild(el)
+  // Remove any stale <style> from the previous (style-tag) implementation so it
+  // can't linger in <head> and override the inline vars after a hot reload.
+  document.getElementById('cs-theme')?.remove()
+
+  // Apply the variables as INLINE styles on <html>. Inline styles win over any
+  // stylesheet rule, so the active theme always beats the globals.css defaults
+  // (and we sidestep dev-only HMR <style> reordering that could let the navy
+  // `.dark { --accent }` override the selected theme).
+  for (const [k, v] of Object.entries(theme.vars)) {
+    root.style.setProperty(k, v)
   }
-  const vars = Object.entries(theme.vars).map(([k, v]) => `  ${k}: ${v};`).join('\n')
-  el.textContent = `:root {\n${vars}\n}`
 }
