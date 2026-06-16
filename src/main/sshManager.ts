@@ -3,7 +3,7 @@ import { BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { appendSessionData, appendSessionCommand } from './sessionLogger'
+import { appendSessionData, appendSessionCommand, resizeSession } from './sessionLogger'
 
 export interface SSHConnectionConfig {
   id: string
@@ -194,6 +194,10 @@ export function createShellSession(sessionId: string, cols: number, rows: number
       (err, stream) => {
         if (err) return reject(err)
 
+        // Match the log emulator's geometry to the real terminal so line
+        // wrapping in the saved log mirrors what the user sees on screen.
+        resizeSession(sessionId, cols, rows)
+
         // Coalesce output and flush to the renderer on a short timer. This keeps
         // the IPC message count low under heavy output (logs, full configs, cat)
         // instead of firing one IPC message per chunk, which freezes the UI.
@@ -255,6 +259,7 @@ export function sendInput(sessionId: string, data: string): void {
 export function resizeTerminal(sessionId: string, cols: number, rows: number): void {
   const conn = activeConnections.get(sessionId) as any
   if (conn?.stream) conn.stream.setWindow(rows, cols, 0, 0)
+  resizeSession(sessionId, cols, rows)  // keep log emulator geometry in sync
 }
 
 export function disconnectSSH(sessionId: string): void {

@@ -213,6 +213,17 @@ interface HostDashboardProps {
 
 let savedScrollTop = 0
 
+const COLLAPSED_KEY = 'collapsedGroups'
+
+function loadCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY)
+    return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+  } catch {
+    return new Set()
+  }
+}
+
 function getIconColor(server: ServerType): string {
   if (server.color) return server.color
   const idx = server.name.charCodeAt(0) % HOST_ICON_COLORS.length
@@ -232,13 +243,17 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
   const scrollRef = useRef<HTMLDivElement>(null)
   const [search, setSearch] = useState('')
 
+  // Restore scroll after layout settles (rAF) so it survives leaving for a
+  // terminal session and coming back to the dashboard.
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = savedScrollTop
+    const restore = () => { if (scrollRef.current) scrollRef.current.scrollTop = savedScrollTop }
+    const raf = requestAnimationFrame(restore)
+    return () => cancelAnimationFrame(raf)
   }, [])
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(
     () => (localStorage.getItem('hostViewMode') as 'grid' | 'list') ?? 'grid'
   )
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(loadCollapsed)
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null)
   const [serverMenuId, setServerMenuId] = useState<string | null>(null)
   const [addingGroup, setAddingGroup] = useState(false)
@@ -271,8 +286,16 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
     setCollapsedGroups((prev) => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
       return next
     })
+
+  // Open every connectable host in a group (skips VNC, which is not implemented yet)
+  const handleOpenAll = (items: ServerType[]) => {
+    items
+      .filter((s) => (s.protocol ?? 'ssh') !== 'vnc')
+      .forEach((s) => onConnect(s))
+  }
 
   const handleAddGroup = async (name: string) => {
     const saved = await window.api.groups.save({ id: '', name })
@@ -457,6 +480,7 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
                     collapsed={collapsed}
                     onToggle={() => toggleGroup(group.id)}
                     onAddHost={() => setRightPanel({ mode: 'new', groupId: group.id })}
+                    onOpenAll={() => handleOpenAll(items)}
                     onDelete={() => handleDeleteGroup(group.id)}
                     onEdit={() => handleStartEditGroup(group)}
                     editing={editingGroupId === group.id}
@@ -516,9 +540,9 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
   )
 }
 
-function GroupHeader({ group, count, collapsed, onToggle, onAddHost, onDelete, onEdit, editing, editingName, onEditNameChange, onEditCommit, onEditCancel, menuOpen, onMenuOpen, onMenuClose, onDragStart, onDragEnd }: {
+function GroupHeader({ group, count, collapsed, onToggle, onAddHost, onOpenAll, onDelete, onEdit, editing, editingName, onEditNameChange, onEditCommit, onEditCancel, menuOpen, onMenuOpen, onMenuClose, onDragStart, onDragEnd }: {
   group: Group; count: number; collapsed: boolean
-  onToggle: () => void; onAddHost: () => void; onDelete: () => void; onEdit: () => void
+  onToggle: () => void; onAddHost: () => void; onOpenAll: () => void; onDelete: () => void; onEdit: () => void
   editing: boolean; editingName: string
   onEditNameChange: (n: string) => void; onEditCommit: () => void; onEditCancel: () => void
   menuOpen: boolean; onMenuOpen: (e: React.MouseEvent) => void; onMenuClose: () => void
@@ -536,8 +560,8 @@ function GroupHeader({ group, count, collapsed, onToggle, onAddHost, onDelete, o
       {/* Left: folder icon + name (toggle area) */}
       <button
         onClick={onToggle}
-        className="flex items-center gap-2 flex-1 min-w-0"
-        style={{ background: 'none', color: 'var(--text-secondary)', cursor: editing ? 'default' : 'grab' }}
+        className="flex items-center gap-2 min-w-0"
+        style={{ background: 'none', color: 'var(--text-secondary)', cursor: editing ? 'default' : 'grab', maxWidth: '70%' }}
         disabled={editing}
       >
         <span style={{ color: group.color ?? 'var(--text-muted)', flexShrink: 0 }}>
@@ -588,12 +612,15 @@ function GroupHeader({ group, count, collapsed, onToggle, onAddHost, onDelete, o
           >
             <ChevronDown size={13} style={{ transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 0.15s' }} />
           </button>
+          {/* spacer fills the rest so name + controls stay grouped on the left */}
+          <div style={{ flex: 1 }} />
         </>
       )}
 
       {menuOpen && (
-        <DropMenu onClose={onMenuClose} items={[
+        <DropMenu align="left" onClose={onMenuClose} items={[
           { label: '+ Add Host', onClick: onAddHost },
+          ...(count > 0 ? [{ label: `Open all (${count})`, onClick: onOpenAll }] : []),
           { label: 'Rename', onClick: onEdit },
           { label: 'Delete Group', onClick: onDelete, danger: true }
         ]} />
@@ -703,12 +730,15 @@ function HostCard({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen
 
   return (
     <div
-      className="relative rounded-xl cursor-pointer overflow-hidden cs-glass"
+      className="relative rounded-xl cursor-pointer cs-glass"
       style={{
         background: hovered ? 'var(--bg-elevated)' : 'var(--bg-card)',
         border: `1px solid ${hovered ? color + '66' : 'var(--glass-border)'}`,
         boxShadow: hovered ? `0 8px 28px rgba(0,0,0,0.28), 0 0 0 1px ${color}33` : 'var(--glass-shadow)',
-        transition: 'all 0.18s ease'
+        transition: 'all 0.18s ease',
+        // overflow-hidden clips the dropdown menu; lift + reveal only when its menu is open
+        overflow: menuOpen ? 'visible' : 'hidden',
+        zIndex: menuOpen ? 50 : 'auto'
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -822,7 +852,8 @@ function HostRow({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen,
       style={{
         background: hovered ? 'var(--bg-elevated)' : 'var(--bg-card)',
         border: `1px solid ${hovered ? 'var(--accent)' : 'var(--glass-border)'}`,
-        transition: 'all 0.12s'
+        transition: 'all 0.12s',
+        zIndex: menuOpen ? 50 : 'auto'
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -905,14 +936,15 @@ function ProtoBadge({ proto }: { proto: string }) {
   )
 }
 
-function DropMenu({ items, onClose }: {
+function DropMenu({ items, onClose, align = 'right' }: {
   items: { label: string; onClick: () => void; danger?: boolean }[]
   onClose: () => void
+  align?: 'left' | 'right'
 }) {
   return (
     <div
-      className="absolute right-0 top-7 z-50 rounded-lg py-1 animate-fade-in cs-glass-strong"
-      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', minWidth: 140 }}
+      className="absolute top-7 z-50 rounded-lg py-1 animate-fade-in cs-glass-strong"
+      style={{ [align]: 0, background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', minWidth: 140 }}
       onClick={(e) => e.stopPropagation()}
     >
       {items.map((item) => (

@@ -1,19 +1,32 @@
 import { useState } from 'react'
-import { Monitor, List, FileDown, Settings, Terminal, KeyRound, Cloud } from 'lucide-react'
+import { Monitor, List, FileDown, Settings, Terminal, KeyRound, Cloud, Code2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { NavPage } from '../../types'
 
 const NAV_ITEMS: { id: NavPage; label: string; icon: React.ReactNode }[] = [
   { id: 'hosts',  label: 'Hosts',  icon: <Monitor size={15} /> },
   { id: 'vault',  label: 'Vault',  icon: <KeyRound size={15} /> },
+  { id: 'snippets', label: 'Snippets', icon: <Code2 size={15} /> },
   { id: 'logs',   label: 'Logs',   icon: <List size={15} /> },
   { id: 'export', label: 'Export', icon: <FileDown size={15} /> },
   { id: 'cloud',  label: 'Cloud',  icon: <Cloud size={15} /> },
 ]
 
 export default function Sidebar() {
-  const { activePage, setActivePage, tabs, setRightPanel } = useAppStore()
-  const activeSessions = tabs.filter((t) => t.status === 'connected' || t.status === 'connecting').length
+  const { activePage, setActivePage, tabs, setRightPanel, setActiveTab } = useAppStore()
+  const isLive = (t: { status: string }) => t.status === 'connected' || t.status === 'connecting'
+  const normalTabs = tabs.filter((t) => (t.kind ?? 'normal') === 'normal')
+  const scriptTabs = tabs.filter((t) => t.kind === 'script')
+  const normalCount = normalTabs.filter(isLive).length
+  const scriptCount = scriptTabs.filter(isLive).length
+
+  // Switch page AND make sure the active tab belongs to that strip
+  const openStrip = (page: 'terminal' | 'scripts', stripTabs: typeof tabs) => {
+    setActivePage(page)
+    if (!stripTabs.some((t) => t.id === useAppStore.getState().activeTabId) && stripTabs.length > 0) {
+      setActiveTab(stripTabs[stripTabs.length - 1].id)
+    }
+  }
 
   return (
     <div
@@ -32,17 +45,26 @@ export default function Sidebar() {
           />
         ))}
 
-        {activeSessions > 0 && (
-          <>
-            <div style={{ height: 1, background: 'var(--border-subtle)', margin: '6px 6px' }} />
-            <NavItem
-              icon={<Terminal size={15} />}
-              label="Terminal"
-              active={activePage === 'terminal'}
-              badge={activeSessions}
-              onClick={() => setActivePage('terminal')}
-            />
-          </>
+        {(normalCount > 0 || scriptCount > 0) && (
+          <div style={{ height: 1, background: 'var(--border-subtle)', margin: '6px 6px' }} />
+        )}
+        {normalCount > 0 && (
+          <NavItem
+            icon={<Terminal size={15} />}
+            label="Terminal"
+            active={activePage === 'terminal'}
+            badge={normalCount}
+            onClick={() => openStrip('terminal', normalTabs)}
+          />
+        )}
+        {scriptCount > 0 && (
+          <NavItem
+            icon={<Code2 size={15} />}
+            label="Scripts"
+            active={activePage === 'scripts'}
+            badge={scriptCount}
+            onClick={() => openStrip('scripts', scriptTabs)}
+          />
         )}
       </div>
 

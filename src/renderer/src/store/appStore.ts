@@ -1,11 +1,12 @@
 import { create } from 'zustand'
-import type { Server, Group, SSHKey, Credential, Tab, AppSettings, Theme, NavPage, LogEntry } from '../types'
+import type { Server, Group, SSHKey, Credential, Snippet, Tab, AppSettings, Theme, NavPage, LogEntry } from '../types'
 
 interface AppState {
   servers: Server[]
   groups: Group[]
   keys: SSHKey[]
   credentials: Credential[]
+  snippets: Snippet[]
   settings: AppSettings
   tabs: Tab[]
   activeTabId: string | null
@@ -14,12 +15,15 @@ interface AppState {
   rightPanel: null | { mode: 'new'; groupId?: string } | { mode: 'edit'; server: Server }
   logs: LogEntry[]
   isLoading: boolean
+  /** bump to ask the active TerminalPane to refocus (e.g. after a snippet insert) */
+  terminalFocusNonce: number
   cloudRecovery: { access_token: string; refresh_token: string; type: string | null } | null
 
   setServers: (s: Server[]) => void
   setGroups: (g: Group[]) => void
   setKeys: (k: SSHKey[]) => void
   setCredentials: (c: Credential[]) => void
+  setSnippets: (s: Snippet[]) => void
   setSettings: (s: AppSettings) => void
   setTheme: (t: Theme) => void
   setActivePage: (p: NavPage) => void
@@ -40,12 +44,16 @@ interface AppState {
   upsertCredential: (c: Credential) => void
   removeCredential: (id: string) => void
 
+  upsertSnippet: (s: Snippet) => void
+  removeSnippet: (id: string) => void
+
   addLog: (e: LogEntry) => void
   setLogs: (e: LogEntry[]) => void
   clearLogs: () => void
 
   setLoading: (v: boolean) => void
   setCloudRecovery: (p: AppState['cloudRecovery']) => void
+  focusTerminal: () => void
 }
 
 const defaultSettings: AppSettings = {
@@ -66,6 +74,7 @@ export const useAppStore = create<AppState>((set) => ({
   groups: [],
   keys: [],
   credentials: [],
+  snippets: [],
   settings: defaultSettings,
   tabs: [],
   activeTabId: null,
@@ -74,12 +83,14 @@ export const useAppStore = create<AppState>((set) => ({
   rightPanel: null,
   logs: [],
   isLoading: false,
+  terminalFocusNonce: 0,
   cloudRecovery: null,
 
   setServers: (servers) => set({ servers }),
   setGroups: (groups) => set({ groups }),
   setKeys: (keys) => set({ keys }),
   setCredentials: (credentials) => set({ credentials }),
+  setSnippets: (snippets) => set({ snippets }),
   setSettings: (settings) => set({ settings }),
   setTheme: (theme) => set({ theme }),
   setActivePage: (activePage) => set({ activePage }),
@@ -137,10 +148,20 @@ export const useAppStore = create<AppState>((set) => ({
       servers: s.servers.map((x) => (x.credentialId === id ? { ...x, credentialId: undefined } : x))
     })),
 
+  upsertSnippet: (snippet) =>
+    set((s) => ({
+      snippets:
+        s.snippets.find((x) => x.id === snippet.id)
+          ? s.snippets.map((x) => (x.id === snippet.id ? snippet : x))
+          : [...s.snippets, snippet]
+    })),
+  removeSnippet: (id) => set((s) => ({ snippets: s.snippets.filter((x) => x.id !== id) })),
+
   addLog: (entry) => set((s) => ({ logs: [entry, ...s.logs].slice(0, 1000) })),
   setLogs: (logs) => set({ logs }),
   clearLogs: () => set({ logs: [] }),
 
   setLoading: (v) => set({ isLoading: v }),
-  setCloudRecovery: (cloudRecovery) => set({ cloudRecovery })
+  setCloudRecovery: (cloudRecovery) => set({ cloudRecovery }),
+  focusTerminal: () => set((s) => ({ terminalFocusNonce: s.terminalFocusNonce + 1 }))
 }))

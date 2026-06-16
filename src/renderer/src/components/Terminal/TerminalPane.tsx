@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, memo } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -29,12 +29,15 @@ const COLOR_PRELUDE =
   " alias ls='ls --color=auto' 2>/dev/null; alias grep='grep --color=auto' 2>/dev/null;" +
   " command ip -c -V >/dev/null 2>&1 && alias ip='ip -c'; clear\n"
 
-export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: TerminalPaneProps) {
+function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const searchAddonRef = useRef<SearchAddon | null>(null)
-  const { settings, updateTab } = useAppStore()
+  const webglRef = useRef<WebglAddon | null>(null)
+  const settings = useAppStore((s) => s.settings)
+  const updateTab = useAppStore((s) => s.updateTab)
+  const terminalFocusNonce = useAppStore((s) => s.terminalFocusNonce)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [isDisconnected, setIsDisconnected] = useState(false)
@@ -105,16 +108,11 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
     terminal.loadAddon(searchAddon)
     terminal.open(container)
 
-    // GPU-accelerated rendering. This is the single biggest perf win for the
-    // terminal — the default DOM renderer chokes on heavy output. Fall back
-    // silently to the DOM renderer if WebGL is unavailable or its context is lost.
-    try {
-      const webglAddon = new WebglAddon()
-      webglAddon.onContextLoss(() => webglAddon.dispose())
-      terminal.loadAddon(webglAddon)
-    } catch {
-      /* WebGL unavailable — DOM renderer stays active */
-    }
+    // WebGL is attached lazily, only while this pane is the active/visible one
+    // (see the isActive effect below). Each WebGL addon holds a GPU context and
+    // browsers cap those at ~16 — broadcasting a snippet to a whole group would
+    // otherwise spawn N contexts and thrash. Background panes fall back to the
+    // DOM renderer (cheap, only repaints on write).
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
@@ -125,11 +123,11 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && terminal.hasSelection()) {
-        navigator.clipboard.writeText(terminal.getSelection()).catch(() => {})
+        window.api.clipboard.writeText(terminal.getSelection())
         return false
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
-        navigator.clipboard.writeText(terminal.getSelection()).catch(() => {})
+        window.api.clipboard.writeText(terminal.getSelection())
         return false
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
@@ -143,7 +141,7 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
       if (!terminal.hasSelection()) return
       const sel = terminal.getSelection()
       if (!sel) return
-      navigator.clipboard.writeText(sel).catch(() => {})
+      window.api.clipboard.writeText(sel)
       setCopyNotice({ chars: sel.length, key: Date.now() })
     }
     container.addEventListener('mouseup', onMouseUp)
@@ -157,15 +155,14 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
     }
     container.addEventListener('paste', onPaste, true)
 
-    // Right-click: copy if selection, paste if not
+    // Right-click = paste, always, in a single click. The selection was already
+    // copied on mouseup (copy-on-select), so we just clear it and paste — no need
+    // for the old two-step "first click copies+clears, second click pastes".
     container.addEventListener('contextmenu', (e) => {
       e.preventDefault()
-      if (terminal.hasSelection()) {
-        navigator.clipboard.writeText(terminal.getSelection()).catch(() => {})
-        terminal.clearSelection()
-      } else {
-        navigator.clipboard.readText().then((text) => { if (text) terminal.paste(text) }).catch(() => {})
-      }
+      if (terminal.hasSelection()) terminal.clearSelection()
+      const text = window.api.clipboard.readText()
+      if (text) terminal.paste(text)
     })
 
     // Input → SSH. Command tracking + session logging now happen in the main
@@ -189,9 +186,14 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
     let shellOpened = false
     const resizeObserver = new ResizeObserver(() => {
       if (!shellOpened) return
+      // Skip when the pane is collapsed to 0 (would push cols=0/rows=0 to the PTY
+      // and corrupt the remote display). Visibility-hidden panes keep their size,
+      // so background broadcast sessions still get a correct fit.
+      if (!container.clientWidth || !container.clientHeight) return
       fitAddon.fit()
       const dims = fitAddon.proposeDimensions()
-      if (dims && tab.sessionId) window.api.ssh.resize(tab.sessionId, dims.cols, dims.rows)
+      if (dims && dims.cols > 0 && dims.rows > 0 && tab.sessionId)
+        window.api.ssh.resize(tab.sessionId, dims.cols, dims.rows)
     })
     resizeObserver.observe(container)
 
@@ -209,6 +211,11 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
           if (settings.terminalAutoColor !== false && srv?.detectedOs && LINUX_OS.has(srv.detectedOs)) {
             window.api.ssh.input(tab.sessionId!, COLOR_PRELUDE)
           }
+          // Snippet broadcast: run the queued command once the shell is live, then clear it
+          if (tab.pendingCommand) {
+            window.api.ssh.input(tab.sessionId!, tab.pendingCommand + '\n')
+            updateTab(tab.id, { pendingCommand: undefined })
+          }
         })
         .catch((err: any) => {
           terminal.write(`\r\n\x1b[31m[Error opening shell: ${err?.message ?? err}]\x1b[0m\r\n`)
@@ -223,10 +230,35 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
       resizeObserver.disconnect()
       container.removeEventListener('paste', onPaste, true)
       container.removeEventListener('mouseup', onMouseUp)
+      webglRef.current?.dispose()
+      webglRef.current = null
       terminal.dispose()
       terminalRef.current = null
     }
   }, [tab.sessionId])
+
+  // Attach WebGL only while active/visible; dispose it when this pane goes to the
+  // background so we never hold more than a couple of GPU contexts at once.
+  useEffect(() => {
+    const term = terminalRef.current
+    if (!term) return
+    if (isActive && isPageVisible) {
+      if (!webglRef.current) {
+        try {
+          const w = new WebglAddon()
+          w.onContextLoss(() => { w.dispose(); if (webglRef.current === w) webglRef.current = null })
+          term.loadAddon(w)
+          webglRef.current = w
+          term.refresh(0, term.rows - 1)
+        } catch {
+          /* WebGL unavailable — DOM renderer stays active */
+        }
+      }
+    } else if (webglRef.current) {
+      webglRef.current.dispose()
+      webglRef.current = null
+    }
+  }, [isActive, isPageVisible, tab.sessionId])
 
   // Live-apply theme / terminal-color changes to an already-open terminal,
   // so switching themes or picking a new text color updates without reconnecting.
@@ -246,6 +278,12 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
       terminalRef.current?.focus()
     })
   }, [isActive, isPageVisible])
+
+  // Refocus on demand (e.g. after inserting a snippet, the picker stole focus)
+  useEffect(() => {
+    if (terminalFocusNonce === 0 || !isActive || !isPageVisible) return
+    requestAnimationFrame(() => terminalRef.current?.focus())
+  }, [terminalFocusNonce])
 
   const handleSearch = (direction: 'next' | 'prev') => {
     if (!searchAddonRef.current || !searchQuery) return
@@ -340,3 +378,16 @@ export default function TerminalPane({ tab, isActive, isPageVisible, onReconnect
     </div>
   )
 }
+
+// App passes fresh inline callbacks (onReconnect/onClose) every render, so the
+// default shallow memo would never hit. Compare only the props that actually
+// change what this pane shows — callback identity is irrelevant to rendering.
+export default memo(TerminalPane, (a, b) =>
+  a.isActive === b.isActive &&
+  a.isPageVisible === b.isPageVisible &&
+  a.tab.id === b.tab.id &&
+  a.tab.sessionId === b.tab.sessionId &&
+  a.tab.status === b.tab.status &&
+  a.tab.mode === b.tab.mode &&
+  a.tab.pendingCommand === b.tab.pendingCommand
+)

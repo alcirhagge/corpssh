@@ -1,7 +1,21 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, clipboard } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 const api = {
+  // Native clipboard — synchronous and instant (the async navigator.clipboard
+  // API is throttled/sanitized in Electron and adds a noticeable copy→paste lag).
+  clipboard: {
+    readText: (): string => clipboard.readText(),
+    writeText: (text: string): void => clipboard.writeText(text)
+  },
+
+  // Command snippets
+  snippets: {
+    list: () => ipcRenderer.invoke('snippets:list'),
+    save: (snippet: unknown) => ipcRenderer.invoke('snippets:save', snippet),
+    delete: (id: string) => ipcRenderer.invoke('snippets:delete', id)
+  },
+
   // Window controls
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),

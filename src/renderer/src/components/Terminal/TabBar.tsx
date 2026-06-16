@@ -1,23 +1,44 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Terminal, FolderOpen, Plus, Search, X } from 'lucide-react'
+import { Terminal, FolderOpen, Plus, Search, X, Code2, CornerDownLeft, CheckCircle2, Circle, CheckSquare, Square } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
-import type { Tab, Server } from '../../types'
+import type { Tab, Server, Snippet } from '../../types'
 import { HOST_ICON_COLORS } from '../../types'
 
 interface TabBarProps {
+  kind: 'normal' | 'script'
   onCloseTab: (tab: Tab) => void
   onNewTab: (tab: Tab) => void
   onToggleSftp: (tabId: string) => void
   onConnectServer: (server: Server) => void
+  onBroadcastSnippet: (command: string, targets: Server[]) => void
 }
 
 interface CtxMenu { tabId: string; x: number; y: number }
 
-export default function TabBar({ onCloseTab, onNewTab, onToggleSftp, onConnectServer }: TabBarProps) {
-  const { tabs, activeTabId, setActiveTab } = useAppStore()
-  const activeTab = tabs.find((t) => t.id === activeTabId)
+export default function TabBar({ kind, onCloseTab, onNewTab, onToggleSftp, onConnectServer, onBroadcastSnippet }: TabBarProps) {
+  const { tabs, activeTabId, setActiveTab, focusTerminal } = useAppStore()
+  const kindTabs = tabs.filter((t) => (t.kind ?? 'normal') === kind)
+  const activeTab = kindTabs.find((t) => t.id === activeTabId)
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null)
   const [showPicker, setShowPicker] = useState(false)
+  const [showSnippets, setShowSnippets] = useState(false)
+
+  // Send a snippet into the active session. `run` appends a newline (executes);
+  // otherwise the command is just typed so the user can review before Enter.
+  const insertSnippet = (snippet: Snippet, run: boolean) => {
+    if (activeTab?.sessionId && activeTab.status === 'connected' && activeTab.mode === 'terminal') {
+      window.api.ssh.input(activeTab.sessionId, snippet.command + (run ? '\n' : ''))
+    }
+    setShowSnippets(false)
+    focusTerminal()  // picker stole focus — hand it back to the terminal
+  }
+
+  const broadcastSnippet = (snippet: Snippet, targets: Server[]) => {
+    onBroadcastSnippet(snippet.command, targets)
+    setShowSnippets(false)
+  }
+
+  const canInsertSnippet = !!activeTab && activeTab.status === 'connected' && activeTab.mode === 'terminal'
 
   useEffect(() => {
     const close = () => setCtxMenu(null)
@@ -26,7 +47,7 @@ export default function TabBar({ onCloseTab, onNewTab, onToggleSftp, onConnectSe
     return () => { window.removeEventListener('click', close); window.removeEventListener('blur', close) }
   }, [])
 
-  if (tabs.length === 0) return null
+  if (kindTabs.length === 0) return null
 
   const ctxTab = ctxMenu ? tabs.find((t) => t.id === ctxMenu.tabId) : null
 
@@ -41,7 +62,7 @@ export default function TabBar({ onCloseTab, onNewTab, onToggleSftp, onConnectSe
           minHeight: 46
         }}
       >
-        {tabs.map((tab) => (
+        {kindTabs.map((tab) => (
           <TabItem
             key={tab.id}
             tab={tab}
@@ -57,54 +78,70 @@ export default function TabBar({ onCloseTab, onNewTab, onToggleSftp, onConnectSe
           />
         ))}
 
-        {/* Nova conexão */}
+        {/* Nova conexão — só na faixa de sessões normais */}
+        {kind === 'normal' && (
+          <button
+            onClick={() => setShowPicker(true)}
+            title="New connection"
+            className="flex items-center justify-center h-full px-3 flex-shrink-0"
+            style={{ color: 'var(--text-muted)', background: 'transparent' }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+          >
+            <Plus size={15} />
+          </button>
+        )}
+
+        {/* Snippets */}
         <button
-          onClick={() => setShowPicker(true)}
-          title="New connection"
-          className="flex items-center justify-center h-full px-3 flex-shrink-0"
+          onClick={() => setShowSnippets(true)}
+          title="Snippets — insert here or broadcast to many"
+          className="flex items-center justify-center h-full px-2.5 flex-shrink-0"
           style={{ color: 'var(--text-muted)', background: 'transparent' }}
           onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
           onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
         >
-          <Plus size={15} />
+          <Code2 size={15} />
         </button>
 
-        {/* Context menu */}
-        {ctxMenu && ctxTab && (
-          <div
-            className="fixed z-50 rounded-lg py-1 animate-fade-in cs-glass-strong"
-            style={{
-              left: ctxMenu.x,
-              top: ctxMenu.y,
-              background: 'var(--bg-elevated)',
-              border: '1px solid var(--glass-border)',
-              boxShadow: 'var(--glass-shadow)',
-              minWidth: 180
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {ctxTab.status === 'connected' && (
-              <CtxItem
-                label={ctxTab.mode === 'sftp' ? 'Switch to Terminal' : 'Open SFTP'}
-                icon={ctxTab.mode === 'sftp' ? '⌨' : '📁'}
-                onClick={() => { onToggleSftp(ctxTab.id); setCtxMenu(null) }}
-              />
-            )}
-            <CtxItem
-              label="New terminal (same server)"
-              icon="＋"
-              onClick={() => { onNewTab(ctxTab); setCtxMenu(null) }}
-            />
-            <div style={{ height: 1, margin: '3px 8px', background: 'var(--border)' }} />
-            <CtxItem
-              label="Close tab"
-              icon="✕"
-              onClick={() => { onCloseTab(ctxTab); setCtxMenu(null) }}
-              danger
-            />
-          </div>
-        )}
       </div>
+
+      {/* Context menu — rendered outside the scrolling tabbar so overflow/backdrop
+          ancestors don't clip the fixed-positioned popup */}
+      {ctxMenu && ctxTab && (
+        <div
+          className="fixed z-50 rounded-lg py-1 animate-fade-in cs-glass-strong"
+          style={{
+            left: ctxMenu.x,
+            top: ctxMenu.y,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-shadow)',
+            minWidth: 180
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {ctxTab.status === 'connected' && (
+            <CtxItem
+              label={ctxTab.mode === 'sftp' ? 'Switch to Terminal' : 'Open SFTP'}
+              icon={ctxTab.mode === 'sftp' ? '⌨' : '📁'}
+              onClick={() => { onToggleSftp(ctxTab.id); setCtxMenu(null) }}
+            />
+          )}
+          <CtxItem
+            label="New terminal (same server)"
+            icon="＋"
+            onClick={() => { onNewTab(ctxTab); setCtxMenu(null) }}
+          />
+          <div style={{ height: 1, margin: '3px 8px', background: 'var(--border)' }} />
+          <CtxItem
+            label="Close tab"
+            icon="✕"
+            onClick={() => { onCloseTab(ctxTab); setCtxMenu(null) }}
+            danger
+          />
+        </div>
+      )}
 
       {/* Server picker modal */}
       {showPicker && (
@@ -114,7 +151,283 @@ export default function TabBar({ onCloseTab, onNewTab, onToggleSftp, onConnectSe
           onClose={() => setShowPicker(false)}
         />
       )}
+
+      {/* Snippet picker modal */}
+      {showSnippets && (
+        <SnippetPickerModal
+          canInsert={canInsertSnippet}
+          onInsert={(s) => insertSnippet(s, false)}
+          onRun={(s) => insertSnippet(s, true)}
+          onBroadcast={broadcastSnippet}
+          onClose={() => setShowSnippets(false)}
+        />
+      )}
     </>
+  )
+}
+
+// ─── Snippet Picker Modal ─────────────────────────────────────────────────────
+
+function SnippetPickerModal({ canInsert, onInsert, onRun, onBroadcast, onClose }: {
+  canInsert: boolean
+  onInsert: (s: Snippet) => void
+  onRun: (s: Snippet) => void
+  onBroadcast: (s: Snippet, targets: Server[]) => void
+  onClose: () => void
+}) {
+  const { snippets, servers, groups } = useAppStore()
+  const setActivePage = useAppStore((s) => s.setActivePage)
+  const [mode, setMode] = useState<'here' | 'broadcast'>(canInsert ? 'here' : 'broadcast')
+  const [search, setSearch] = useState('')
+  const [picked, setPicked] = useState<Snippet | null>(null)
+  const [targetIds, setTargetIds] = useState<Set<string>>(new Set())
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return snippets
+    const q = search.toLowerCase()
+    return snippets.filter(
+      (s) => s.name.toLowerCase().includes(q) || s.command.toLowerCase().includes(q) || (s.description ?? '').toLowerCase().includes(q)
+    )
+  }, [snippets, search])
+
+  // Broadcast targets — SSH only (RDP/VNC run in external windows, no piped input)
+  const sshServers = useMemo(() => servers.filter((s) => (s.protocol ?? 'ssh') === 'ssh'), [servers])
+  const targetSections = useMemo(() => {
+    const map = new Map<string, Server[]>()
+    map.set('__none__', [])
+    groups.forEach((g) => map.set(g.id, []))
+    sshServers.forEach((s) => {
+      const key = s.groupId && map.has(s.groupId) ? s.groupId : '__none__'
+      map.get(key)!.push(s)
+    })
+    const out: { label: string; items: Server[] }[] = []
+    groups.forEach((g) => { const it = map.get(g.id) ?? []; if (it.length) out.push({ label: g.name, items: it }) })
+    const ung = map.get('__none__') ?? []
+    if (ung.length) out.push({ label: groups.length > 0 ? 'No group' : 'Servers', items: ung })
+    return out
+  }, [sshServers, groups])
+
+  const toggleTarget = (id: string) =>
+    setTargetIds((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleSection = (items: Server[]) =>
+    setTargetIds((prev) => {
+      const n = new Set(prev)
+      const allOn = items.every((s) => n.has(s.id))
+      items.forEach((s) => (allOn ? n.delete(s.id) : n.add(s.id)))
+      return n
+    })
+
+  const runBroadcast = () => {
+    if (!picked || targetIds.size === 0) return
+    onBroadcast(picked, sshServers.filter((s) => targetIds.has(s.id)))
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}
+      onClick={onClose}
+    >
+      <div
+        className="flex flex-col rounded-xl animate-fade-in cs-glass-strong"
+        style={{ background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', width: 480, maxHeight: '80vh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 pt-4 pb-3 flex-shrink-0">
+          <span className="font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)', fontSize: 14 }}>
+            <Code2 size={15} style={{ color: 'var(--accent)' }} /> Snippets
+          </span>
+          <button onClick={onClose} className="flex items-center justify-center w-6 h-6 rounded" style={{ color: 'var(--text-muted)', background: 'transparent' }}>
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Mode toggle */}
+        <div className="flex gap-1.5 px-4 pb-3 flex-shrink-0">
+          <ModeTab label="This terminal" active={mode === 'here'} disabled={!canInsert} onClick={() => { if (canInsert) setMode('here') }} />
+          <ModeTab label="Broadcast" active={mode === 'broadcast'} onClick={() => setMode('broadcast')} />
+        </div>
+
+        <div className="relative px-4 pb-3 flex-shrink-0">
+          <Search size={13} className="absolute left-7 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search snippet..."
+            style={{ paddingLeft: 32, fontSize: 13 }}
+          />
+        </div>
+
+        <div style={{ height: 1, background: 'var(--border-subtle)' }} />
+
+        {snippets.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-8 px-4 text-center">
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No snippets yet</p>
+            <button
+              onClick={() => { onClose(); setActivePage('snippets') }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium"
+              style={{ background: 'var(--accent)', color: '#fff' }}
+            >
+              Manage snippets
+            </button>
+          </div>
+        ) : mode === 'here' ? (
+          <div className="overflow-y-auto flex-1 py-2">
+            {filtered.length === 0 ? (
+              <p className="text-center py-8 text-xs" style={{ color: 'var(--text-muted)' }}>No snippets found</p>
+            ) : (
+              filtered.map((s) => (
+                <SnippetPickerItem key={s.id} snippet={s} onInsert={() => onInsert(s)} onRun={() => onRun(s)} />
+              ))
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="overflow-y-auto flex-1">
+              {/* Step 1: pick snippet */}
+              <p className="px-4 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>1 · Snippet</p>
+              {filtered.length === 0 ? (
+                <p className="text-center py-4 text-xs" style={{ color: 'var(--text-muted)' }}>No snippets found</p>
+              ) : (
+                filtered.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-3 px-4 py-2 cursor-pointer"
+                    style={{ background: picked?.id === s.id ? 'var(--accent-subtle)' : 'transparent' }}
+                    onClick={() => setPicked(s)}
+                  >
+                    <span style={{ color: picked?.id === s.id ? 'var(--accent)' : 'var(--text-muted)' }}>
+                      {picked?.id === s.id ? <CheckCircle2 size={14} /> : <Circle size={14} />}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate" style={{ color: 'var(--text-primary)', fontSize: 13 }}>{s.name}</p>
+                      <p className="truncate" style={{ color: 'var(--text-muted)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }}>{s.command}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+
+              <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 0' }} />
+
+              {/* Step 2: pick targets */}
+              <p className="px-4 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                2 · Targets ({targetIds.size})
+              </p>
+              {targetSections.length === 0 ? (
+                <p className="text-center py-4 text-xs" style={{ color: 'var(--text-muted)' }}>No SSH servers</p>
+              ) : (
+                targetSections.map(({ label, items }) => {
+                  const allOn = items.every((s) => targetIds.has(s.id))
+                  return (
+                    <div key={label} className="mb-1">
+                      <button
+                        onClick={() => toggleSection(items)}
+                        className="flex items-center gap-2 w-full px-4 py-1.5"
+                        style={{ background: 'transparent', color: 'var(--text-secondary)' }}
+                      >
+                        <span style={{ color: allOn ? 'var(--accent)' : 'var(--text-muted)' }}>
+                          {allOn ? <CheckSquare size={14} /> : <Square size={14} />}
+                        </span>
+                        <span className="text-xs font-semibold uppercase tracking-wider" style={{ letterSpacing: '0.06em' }}>{label}</span>
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>({items.length})</span>
+                      </button>
+                      {items.map((s) => (
+                        <div
+                          key={s.id}
+                          className="flex items-center gap-2 px-4 py-1.5 cursor-pointer"
+                          style={{ paddingLeft: 28, background: targetIds.has(s.id) ? 'var(--bg-hover)' : 'transparent' }}
+                          onClick={() => toggleTarget(s.id)}
+                        >
+                          <span style={{ color: targetIds.has(s.id) ? 'var(--accent)' : 'var(--text-muted)' }}>
+                            {targetIds.has(s.id) ? <CheckSquare size={13} /> : <Square size={13} />}
+                          </span>
+                          <span className="truncate" style={{ color: 'var(--text-primary)', fontSize: 12 }}>{s.name}</span>
+                          <span className="truncate" style={{ color: 'var(--text-muted)', fontSize: 11 }}>{s.host}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {picked ? `Run "${picked.name}"` : 'Pick a snippet'} on {targetIds.size} server{targetIds.size === 1 ? '' : 's'}
+              </span>
+              <button
+                onClick={runBroadcast}
+                disabled={!picked || targetIds.size === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+                style={{ background: 'var(--accent)', color: '#fff', opacity: !picked || targetIds.size === 0 ? 0.5 : 1 }}
+              >
+                <CornerDownLeft size={12} /> Run on {targetIds.size}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ModeTab({ label, active, disabled, onClick }: { label: string; active: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="px-3 py-1.5 rounded-lg text-xs font-medium"
+      style={{
+        background: active ? 'var(--accent)' : 'var(--bg-active)',
+        color: active ? '#fff' : 'var(--text-secondary)',
+        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+        opacity: disabled ? 0.4 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer'
+      }}
+      title={disabled ? 'Open a terminal first' : undefined}
+    >
+      {label}
+    </button>
+  )
+}
+
+function SnippetPickerItem({ snippet, onInsert, onRun }: {
+  snippet: Snippet; onInsert: () => void; onRun: () => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <div
+      className="flex items-center gap-3 px-4 py-2.5 cursor-pointer"
+      style={{ background: hovered ? 'var(--bg-hover)' : 'transparent', transition: 'background 0.1s' }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onInsert}
+      title="Click: type into terminal · Run: type and execute"
+    >
+      <div className="flex-1 min-w-0">
+        <p className="font-medium truncate" style={{ color: 'var(--text-primary)', fontSize: 13 }}>{snippet.name}</p>
+        <p className="truncate" style={{ color: 'var(--text-muted)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }}>
+          {snippet.command}
+        </p>
+      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onRun() }}
+        className="flex items-center gap-1 flex-shrink-0 px-2 py-1 rounded text-xs font-medium"
+        style={{ background: 'var(--accent)', color: '#fff', opacity: hovered ? 1 : 0.7 }}
+        title="Type and execute"
+      >
+        <CornerDownLeft size={11} /> Run
+      </button>
+    </div>
   )
 }
 
@@ -127,6 +440,7 @@ function ServerPickerModal({ activeServerId, onSelect, onClose }: {
 }) {
   const { servers, groups } = useAppStore()
   const [search, setSearch] = useState('')
+  const [groupFilter, setGroupFilter] = useState<string>('all')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -157,11 +471,19 @@ function ServerPickerModal({ activeServerId, onSelect, onClose }: {
 
   const sections: { label: string; items: Server[] }[] = []
   groups.forEach((g) => {
+    if (groupFilter !== 'all' && groupFilter !== g.id) return
     const items = byGroup.get(g.id) ?? []
     if (items.length) sections.push({ label: g.name, items })
   })
-  const ungrouped = byGroup.get('__none__') ?? []
-  if (ungrouped.length) sections.push({ label: groups.length > 0 ? 'No group' : 'Servers', items: ungrouped })
+  if (groupFilter === 'all' || groupFilter === '__none__') {
+    const ungrouped = byGroup.get('__none__') ?? []
+    if (ungrouped.length) sections.push({ label: groups.length > 0 ? 'No group' : 'Servers', items: ungrouped })
+  }
+
+  // Only show group filter chips when there's more than one bucket to choose from
+  const ungroupedCount = (byGroup.get('__none__') ?? []).length
+  const groupChips = groups.filter((g) => (byGroup.get(g.id) ?? []).length > 0)
+  const showFilter = groupChips.length > 0 && (groupChips.length + (ungroupedCount > 0 ? 1 : 0)) > 1
 
   return (
     <div
@@ -208,6 +530,24 @@ function ServerPickerModal({ activeServerId, onSelect, onClose }: {
           />
         </div>
 
+        {/* Group filter chips */}
+        {showFilter && (
+          <div className="flex items-center gap-1.5 px-4 pb-3 flex-shrink-0 overflow-x-auto">
+            <GroupChip label="All" active={groupFilter === 'all'} onClick={() => setGroupFilter('all')} />
+            {groupChips.map((g) => (
+              <GroupChip
+                key={g.id}
+                label={g.name}
+                active={groupFilter === g.id}
+                onClick={() => setGroupFilter(g.id)}
+              />
+            ))}
+            {ungroupedCount > 0 && (
+              <GroupChip label="No group" active={groupFilter === '__none__'} onClick={() => setGroupFilter('__none__')} />
+            )}
+          </div>
+        )}
+
         <div style={{ height: 1, background: 'var(--border-subtle)' }} />
 
         {/* Server list */}
@@ -239,6 +579,24 @@ function ServerPickerModal({ activeServerId, onSelect, onClose }: {
         </div>
       </div>
     </div>
+  )
+}
+
+function GroupChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-medium"
+      style={{
+        background: active ? 'var(--accent)' : 'var(--bg-active)',
+        color: active ? '#fff' : 'var(--text-secondary)',
+        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+        whiteSpace: 'nowrap',
+        transition: 'background 0.12s, color 0.12s'
+      }}
+    >
+      {label}
+    </button>
   )
 }
 

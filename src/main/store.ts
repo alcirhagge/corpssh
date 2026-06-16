@@ -46,7 +46,16 @@ interface StoreData {
   groups: GroupRecord[]
   keys: KeyRecord[]
   credentials: CredentialRecord[]
+  snippets: SnippetRecord[]
   settings: AppSettings
+}
+
+export interface SnippetRecord {
+  id: string
+  name: string
+  command: string
+  description?: string
+  updatedAt?: number
 }
 
 export interface ServerRecord {
@@ -127,15 +136,16 @@ function ensureStore(): StoreData {
   try {
     if (!fs.existsSync(STORE_DIR)) fs.mkdirSync(STORE_DIR, { recursive: true })
     if (!fs.existsSync(STORE_FILE)) {
-      const initial: StoreData = { servers: [], groups: [], keys: [], credentials: [], settings: defaultSettings }
+      const initial: StoreData = { servers: [], groups: [], keys: [], credentials: [], snippets: [], settings: defaultSettings }
       fs.writeFileSync(STORE_FILE, JSON.stringify(initial, null, 2))
       return initial
     }
     const data = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8')) as StoreData
     if (!data.credentials) data.credentials = []  // back-compat with older stores
+    if (!data.snippets) data.snippets = []        // back-compat with older stores
     return data
   } catch {
-    return { servers: [], groups: [], keys: [], credentials: [], settings: defaultSettings }
+    return { servers: [], groups: [], keys: [], credentials: [], snippets: [], settings: defaultSettings }
   }
 }
 
@@ -295,6 +305,29 @@ export function resolveServerAuth(serverId: string): Partial<ServerRecord> | nul
     privateKeyContent: c.privateKeyContent,
     passphrase: c.passphrase
   }
+}
+
+// ─── Snippets ────────────────────────────────────────────────────────────────
+export function getSnippets(): SnippetRecord[] {
+  return ensureStore().snippets
+}
+
+function putSnippet(snippet: SnippetRecord): void {
+  const data = ensureStore()
+  const idx = data.snippets.findIndex((s) => s.id === snippet.id)
+  if (idx >= 0) data.snippets[idx] = snippet
+  else data.snippets.push(snippet)
+  save(data)
+}
+
+export function saveSnippet(snippet: SnippetRecord): void {
+  putSnippet({ ...snippet, updatedAt: Date.now() })
+}
+
+export function deleteSnippet(id: string): void {
+  const data = ensureStore()
+  data.snippets = data.snippets.filter((s) => s.id !== id)
+  save(data)
 }
 
 // One-time migration: encrypt any plaintext secrets left over from older versions

@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { Terminal } from '@xterm/headless'
 
 const SESSIONS_DIR = path.join(os.homedir(), '.corpssh', 'sessions')
 
@@ -18,97 +19,150 @@ function ensureDir(): void {
   if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true })
 }
 
-export function createSessionLog(meta: SessionMeta): void {
-  ensureDir()
-  const file = path.join(SESSIONS_DIR, `${meta.sessionId}.log`)
-  const header = [
+function logPath(sessionId: string): string {
+  return path.join(SESSIONS_DIR, `${sessionId}.log`)
+}
+function metaPath(sessionId: string): string {
+  return path.join(SESSIONS_DIR, `${sessionId}.json`)
+}
+
+// ─── Headless terminal emulator per session ─────────────────────────────────
+// We feed the raw SSH byte stream into a real (headless) xterm. Instead of
+// dumping the stream verbatim — which linearises cursor-addressed output
+// (neofetch's two columns, progress bars redrawn with \r, top/htop frames) into
+// garbage — we periodically serialise the EMULATOR's rendered buffer to disk.
+// The on-disk log then matches exactly what the user saw on screen, already
+// clean of ANSI escapes and carriage-return redraws.
+interface Session {
+  term: Terminal
+  header: string
+}
+
+const SCROLLBACK = 10000
+const DEFAULT_COLS = 120
+const DEFAULT_ROWS = 40
+const SNAPSHOT_INTERVAL = 1500
+
+const sessions = new Map<string, Session>()
+const dirty = new Set<string>()
+let snapshotTimer: NodeJS.Timeout | null = null
+
+function buildHeader(meta: SessionMeta): string {
+  return [
     `=== CorpSSH Session Log ===`,
     `Server  : ${meta.serverName}`,
     `Host    : ${meta.host}`,
     `User    : ${meta.username}`,
     `Started : ${new Date(meta.startedAt).toISOString()}`,
     `=`.repeat(40),
+    '',
     ''
   ].join('\n')
-  fs.writeFileSync(file, header, 'utf-8')
-
-  // Save metadata
-  const metaFile = path.join(SESSIONS_DIR, `${meta.sessionId}.json`)
-  fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8')
 }
 
-function stripAnsi(str: string): string {
-  return str
-    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b[^[\]]/g, '')
-    .replace(/\x9b[0-9;?]*[A-Za-z]/g, '')
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
+export function createSessionLog(meta: SessionMeta): void {
+  ensureDir()
+  const header = buildHeader(meta)
+  fs.writeFileSync(logPath(meta.sessionId), header, 'utf-8')
+  fs.writeFileSync(metaPath(meta.sessionId), JSON.stringify(meta, null, 2), 'utf-8')
+
+  const term = new Terminal({
+    cols: DEFAULT_COLS,
+    rows: DEFAULT_ROWS,
+    scrollback: SCROLLBACK,
+    allowProposedApi: true  // needed for buffer.active access
+  })
+  sessions.set(meta.sessionId, { term, header })
 }
 
-// ─── Buffered writes ───────────────────────────────────────────────────────
-// Writing to disk on every data chunk (fs.appendFileSync per chunk) blocks the
-// main process and freezes the UI under heavy output. Instead we accumulate
-// per-session text in memory and flush on a short timer. Both data and command
-// entries go through the same buffer so their ordering is preserved on disk.
-const writeBuffers = new Map<string, string>()
-let flushTimer: NodeJS.Timeout | null = null
-const FLUSH_INTERVAL = 500
-
-function scheduleFlush(): void {
-  if (flushTimer) return
-  flushTimer = setTimeout(flushAll, FLUSH_INTERVAL)
-}
-
-function flushAll(): void {
-  flushTimer = null
-  for (const [sessionId, buf] of writeBuffers) {
-    if (buf) writeToDisk(sessionId, buf)
+// Render the emulator's full buffer (scrollback + viewport) to clean plain text.
+function dumpBody(term: Terminal): string {
+  const buf = term.buffer.active
+  const lines: string[] = []
+  for (let i = 0; i < buf.length; i++) {
+    const line = buf.getLine(i)
+    lines.push(line ? line.translateToString(true).replace(/\s+$/, '') : '')
   }
-  writeBuffers.clear()
+  // Drop trailing blank lines so the log doesn't end with a wall of whitespace
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
+  return lines.join('\n')
 }
 
-function writeToDisk(sessionId: string, text: string): void {
-  const file = path.join(SESSIONS_DIR, `${sessionId}.log`)
+function snapshotToDisk(sessionId: string): void {
+  const s = sessions.get(sessionId)
+  if (!s) return
   try {
-    if (fs.existsSync(file)) fs.appendFileSync(file, text, 'utf-8')
+    fs.writeFileSync(logPath(sessionId), s.header + dumpBody(s.term) + '\n', 'utf-8')
   } catch { /* ignore log write failures */ }
 }
 
-// Flush a single session synchronously — used before closing/reading its log.
-export function flushSession(sessionId: string): void {
-  const buf = writeBuffers.get(sessionId)
-  if (buf) {
-    writeBuffers.delete(sessionId)
-    writeToDisk(sessionId, buf)
-  }
+function scheduleSnapshot(): void {
+  if (snapshotTimer) return
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null
+    for (const id of dirty) snapshotToDisk(id)
+    dirty.clear()
+  }, SNAPSHOT_INTERVAL)
+}
+
+// Wait for the emulator's write queue to drain, then run fn with a current buffer.
+function whenDrained(term: Terminal, fn: () => void): void {
+  term.write('', fn)
 }
 
 export function appendSessionData(sessionId: string, data: string): void {
-  writeBuffers.set(sessionId, (writeBuffers.get(sessionId) ?? '') + stripAnsi(data))
-  scheduleFlush()
+  const s = sessions.get(sessionId)
+  if (!s) return
+  s.term.write(data)
+  dirty.add(sessionId)
+  scheduleSnapshot()
 }
 
-export function appendSessionCommand(sessionId: string, command: string): void {
-  const ts = new Date().toISOString().substring(11, 19)
-  writeBuffers.set(sessionId, (writeBuffers.get(sessionId) ?? '') + `\n[${ts}] CMD> ${command}\n`)
-  scheduleFlush()
+// Commands are already echoed by the remote shell and captured by the emulator,
+// so we no longer inject synthetic "CMD>" markers — they would duplicate the
+// echoed input and break cursor-addressed redraws. Kept as a no-op so the
+// caller (sshManager) needs no change.
+export function appendSessionCommand(_sessionId: string, _command: string): void {
+  /* intentionally empty — see comment above */
+}
+
+export function resizeSession(sessionId: string, cols: number, rows: number): void {
+  const s = sessions.get(sessionId)
+  if (s && cols > 0 && rows > 0) {
+    try { s.term.resize(cols, rows) } catch { /* ignore */ }
+  }
+}
+
+export function flushSession(sessionId: string): void {
+  dirty.delete(sessionId)
+  snapshotToDisk(sessionId)
 }
 
 export function closeSessionLog(sessionId: string, endedAt: number): void {
-  flushSession(sessionId)
-  const metaFile = path.join(SESSIONS_DIR, `${sessionId}.json`)
-  if (fs.existsSync(metaFile)) {
-    const meta = JSON.parse(fs.readFileSync(metaFile, 'utf-8')) as SessionMeta
-    meta.endedAt = endedAt
-    fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf-8')
-  }
-  const logFile = path.join(SESSIONS_DIR, `${sessionId}.log`)
-  if (fs.existsSync(logFile)) {
+  const s = sessions.get(sessionId)
+
+  const finalize = (): void => {
     const footer = `\n${'='.repeat(40)}\nSession ended: ${new Date(endedAt).toISOString()}\n`
-    fs.appendFileSync(logFile, footer, 'utf-8')
+    try {
+      if (fs.existsSync(logPath(sessionId))) fs.appendFileSync(logPath(sessionId), footer, 'utf-8')
+    } catch { /* ignore */ }
+    if (s) { s.term.dispose(); sessions.delete(sessionId) }
+    dirty.delete(sessionId)
+  }
+
+  // Update meta first (independent of the emulator)
+  try {
+    if (fs.existsSync(metaPath(sessionId))) {
+      const meta = JSON.parse(fs.readFileSync(metaPath(sessionId), 'utf-8')) as SessionMeta
+      meta.endedAt = endedAt
+      fs.writeFileSync(metaPath(sessionId), JSON.stringify(meta, null, 2), 'utf-8')
+    }
+  } catch { /* ignore */ }
+
+  if (s) {
+    whenDrained(s.term, () => { snapshotToDisk(sessionId); finalize() })
+  } else {
+    finalize()
   }
 }
 
@@ -124,44 +178,56 @@ export function listSessions(): SessionMeta[] {
     .sort((a, b) => (b!.startedAt ?? 0) - (a!.startedAt ?? 0)) as SessionMeta[]
 }
 
-export function readSessionLog(sessionId: string): string {
-  flushSession(sessionId)
-  const file = path.join(SESSIONS_DIR, `${sessionId}.log`)
-  if (!fs.existsSync(file)) return ''
-  return fs.readFileSync(file, 'utf-8')
+// Async so we can drain the emulator's pending writes before reading a live session.
+export function readSessionLog(sessionId: string): Promise<string> {
+  return new Promise((resolve) => {
+    const s = sessions.get(sessionId)
+    if (s) {
+      whenDrained(s.term, () => {
+        snapshotToDisk(sessionId)
+        dirty.delete(sessionId)
+        resolve(s.header + dumpBody(s.term) + '\n')
+      })
+      return
+    }
+    try {
+      resolve(fs.existsSync(logPath(sessionId)) ? fs.readFileSync(logPath(sessionId), 'utf-8') : '')
+    } catch {
+      resolve('')
+    }
+  })
 }
 
 export function deleteSession(sessionId: string): void {
-  const log = path.join(SESSIONS_DIR, `${sessionId}.log`)
-  const meta = path.join(SESSIONS_DIR, `${sessionId}.json`)
-  if (fs.existsSync(log)) fs.unlinkSync(log)
-  if (fs.existsSync(meta)) fs.unlinkSync(meta)
+  const s = sessions.get(sessionId)
+  if (s) { s.term.dispose(); sessions.delete(sessionId) }
+  dirty.delete(sessionId)
+  if (fs.existsSync(logPath(sessionId))) fs.unlinkSync(logPath(sessionId))
+  if (fs.existsSync(metaPath(sessionId))) fs.unlinkSync(metaPath(sessionId))
 }
 
 // Called on app startup: marks any session without endedAt as closed.
-// Sessions left open happen when the app crashes or is force-closed.
+// Sessions left open happen when the app crashes or is force-closed; the last
+// periodic snapshot (≤ SNAPSHOT_INTERVAL old) is preserved on disk.
 export function cleanupOrphanedSessions(): void {
   try {
     ensureDir()
     const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json'))
     for (const file of files) {
       try {
-        const metaPath = path.join(SESSIONS_DIR, file)
-        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as SessionMeta
+        const mp = path.join(SESSIONS_DIR, file)
+        const meta = JSON.parse(fs.readFileSync(mp, 'utf-8')) as SessionMeta
         if (meta.endedAt) continue
 
-        // Use .log file mtime as approximate end time; fallback to now
-        const logPath = path.join(SESSIONS_DIR, `${meta.sessionId}.log`)
-        const endedAt = fs.existsSync(logPath)
-          ? fs.statSync(logPath).mtimeMs
-          : Date.now()
+        const lp = logPath(meta.sessionId)
+        const endedAt = fs.existsSync(lp) ? fs.statSync(lp).mtimeMs : Date.now()
 
         meta.endedAt = endedAt
-        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8')
+        fs.writeFileSync(mp, JSON.stringify(meta, null, 2), 'utf-8')
 
-        if (fs.existsSync(logPath)) {
+        if (fs.existsSync(lp)) {
           const footer = `\n${'='.repeat(40)}\nSession ended: ${new Date(endedAt).toISOString()} (recovered on restart)\n`
-          fs.appendFileSync(logPath, footer, 'utf-8')
+          fs.appendFileSync(lp, footer, 'utf-8')
         }
       } catch { /* skip corrupt entries */ }
     }

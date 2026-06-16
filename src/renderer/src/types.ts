@@ -52,6 +52,13 @@ export interface SSHKey {
   comment?: string
 }
 
+export interface Snippet {
+  id: string
+  name: string
+  command: string
+  description?: string
+}
+
 export interface AppSettings {
   theme: 'dark' | 'light' | 'system'
   themeId: string
@@ -79,6 +86,10 @@ export interface Tab {
   errorMessage?: string
   mode: 'terminal' | 'sftp'
   connectedAt?: number
+  /** command to auto-run once the shell is ready (snippet broadcast) */
+  pendingCommand?: string
+  /** 'normal' = user-opened session; 'script' = spawned by a snippet broadcast */
+  kind?: 'normal' | 'script'
 }
 
 export interface SFTPEntry {
@@ -114,7 +125,7 @@ export interface RemoteLogConfig {
 }
 
 export type Theme = 'dark' | 'light'
-export type NavPage = 'hosts' | 'keys' | 'logs' | 'export' | 'terminal' | 'vault' | 'cloud'
+export type NavPage = 'hosts' | 'keys' | 'logs' | 'export' | 'terminal' | 'vault' | 'cloud' | 'snippets' | 'scripts'
 
 export const SERVER_COLORS = [
   '#4c74ff', '#30d48a', '#f7b731', '#ff5757',

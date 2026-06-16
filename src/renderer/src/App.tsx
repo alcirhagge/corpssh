@@ -12,6 +12,7 @@ import LogsPanel from './components/Logs/LogsPanel'
 import ExportPanel from './components/Export/ExportPanel'
 import CredentialsPanel from './components/Vault/CredentialsPanel'
 import CloudPanel from './components/Cloud/CloudPanel'
+import SnippetsPanel from './components/Snippets/SnippetsPanel'
 import SettingsPanel from './components/Dialogs/SettingsPanel'
 import UpdateNotification from './components/Layout/UpdateNotification'
 import type { Server, Tab, LogEntry } from './types'
@@ -19,7 +20,7 @@ import { applyTheme, getThemeBase } from './themes'
 
 export default function App() {
   const {
-    setServers, setGroups, setKeys, setCredentials, setSettings,
+    setServers, setGroups, setKeys, setCredentials, setSnippets, setSettings,
     addTab, updateTab, removeTab, setActiveTab, setActivePage,
     upsertServer, theme, setTheme, addLog, setCloudRecovery,
     servers, tabs, activeTabId, activePage, rightPanel
@@ -28,17 +29,19 @@ export default function App() {
   // Load data + apply theme
   useEffect(() => {
     const load = async () => {
-      const [serverList, groupList, keyList, credList, settingsData] = await Promise.all([
+      const [serverList, groupList, keyList, credList, snippetList, settingsData] = await Promise.all([
         window.api.servers.list(),
         window.api.groups.list(),
         window.api.keys.list(),
         window.api.credentials.list(),
+        window.api.snippets.list(),
         window.api.settings.get()
       ])
       setServers(serverList)
       setGroups(groupList.slice().sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999)))
       setKeys(keyList)
       setCredentials(credList)
+      setSnippets(snippetList)
       setSettings(settingsData)
       const themeId = settingsData.themeId ?? 'navy'
       const base = getThemeBase(themeId)
@@ -78,8 +81,13 @@ export default function App() {
     return () => { unsub(); unsubOs(); unsubCloud(); unsubRecovery() }
   }, [])
 
-  const openSSHTab = async (server: Server, mode: 'terminal' | 'sftp') => {
-    const tabId = `tab-${Date.now()}`
+  const openSSHTab = async (
+    server: Server,
+    mode: 'terminal' | 'sftp',
+    pendingCommand?: string,
+    kind: 'normal' | 'script' = 'normal'
+  ) => {
+    const tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     addTab({
       id: tabId,
       serverId: server.id,
@@ -87,9 +95,11 @@ export default function App() {
       serverHost: `${server.host}:${server.port}`,
       status: 'connecting',
       mode,
-      connectedAt: Date.now()
+      connectedAt: Date.now(),
+      pendingCommand,
+      kind
     })
-    setActivePage('terminal')
+    setActivePage(kind === 'script' ? 'scripts' : 'terminal')
     try {
       const sessionId = await window.api.ssh.connect({
         id: server.id, name: server.name,
@@ -138,6 +148,15 @@ export default function App() {
     if (server) handleConnectServer(server)
   }
 
+  // Snippet broadcast: open one SSH tab per target server and auto-run the command.
+  // Only SSH hosts (RDP/VNC run in external windows and can't take piped input).
+  const handleBroadcastSnippet = (command: string, targets: Server[]) => {
+    const sshTargets = targets.filter((s) => (s.protocol ?? 'ssh') === 'ssh')
+    if (sshTargets.length === 0) return
+    setActivePage('scripts')
+    sshTargets.forEach((s) => openSSHTab(s, 'terminal', command, 'script'))
+  }
+
   const handleToggleSftp = (tabId: string) => {
     const tab = tabs.find((t) => t.id === tabId)
     if (!tab || tab.status !== 'connected') return
@@ -160,16 +179,22 @@ export default function App() {
     if (tabs.filter((t) => t.id !== tab.id).length === 0) setActivePage('hosts')
   }
 
-  const activeTab = tabs.find((t) => t.id === activeTabId)
-
   // Determine what to render in the main area
   const showTerminal = activePage === 'terminal'
+  const showScripts = activePage === 'scripts'
   const showHosts = activePage === 'hosts'
   const showLogs = activePage === 'logs'
   const showExport = activePage === 'export'
   const showVault = activePage === 'vault'
   const showCloud = activePage === 'cloud'
+  const showSnippets = activePage === 'snippets'
   const showSettings = activePage === 'keys'
+
+  // Normal vs script (snippet-broadcast) sessions live in separate strips
+  const inTerminalArea = showTerminal || showScripts
+  const pageKind: 'normal' | 'script' = showScripts ? 'script' : 'normal'
+  const tabKind = (t: Tab) => t.kind ?? 'normal'
+  const currentTabs = tabs.filter((t) => tabKind(t) === pageKind)
 
   return (
     <div className={`flex flex-col h-screen ${theme}`} style={{ background: 'var(--bg-app)' }}>
@@ -181,13 +206,15 @@ export default function App() {
         {/* Main content */}
         <div className="flex flex-col flex-1 overflow-hidden">
 
-          {/* Terminal tabs — só visível na página terminal */}
-          {showTerminal && tabs.length > 0 && (
+          {/* Terminal tabs — visível nas páginas terminal/scripts, filtrado por kind */}
+          {inTerminalArea && currentTabs.length > 0 && (
             <TabBar
+              kind={pageKind}
               onCloseTab={handleCloseTab}
               onNewTab={handleNewTab}
               onToggleSftp={handleToggleSftp}
               onConnectServer={handleConnectServer}
+              onBroadcastSnippet={handleBroadcastSnippet}
             />
           )}
 
@@ -212,15 +239,17 @@ export default function App() {
             {tabs.length > 0 && (
               <div
                 className="flex-1 overflow-hidden relative"
-                style={{ display: showTerminal ? 'block' : 'none' }}
+                style={{ display: inTerminalArea ? 'block' : 'none' }}
               >
-                {tabs.map((tab) => (
+                {tabs.map((tab) => {
+                  const visible = tab.id === activeTabId && tabKind(tab) === pageKind
+                  return (
                   <div
                     key={tab.id}
                     className="absolute inset-0"
                     style={{
-                      visibility: tab.id === activeTabId ? 'visible' : 'hidden',
-                      pointerEvents: tab.id === activeTabId ? 'auto' : 'none'
+                      visibility: visible ? 'visible' : 'hidden',
+                      pointerEvents: visible ? 'auto' : 'none'
                     }}
                   >
                     {tab.status === 'connecting' && <LoadingScreen name={tab.serverName} host={tab.serverHost} />}
@@ -241,8 +270,8 @@ export default function App() {
                         <div style={{ position: 'absolute', inset: 0, display: tab.mode === 'sftp' && tab.status === 'connected' ? 'none' : 'block' }}>
                           <TerminalPane
                             tab={tab}
-                            isActive={tab.id === activeTabId && !(tab.mode === 'sftp' && tab.status === 'connected')}
-                            isPageVisible={showTerminal}
+                            isActive={visible && !(tab.mode === 'sftp' && tab.status === 'connected')}
+                            isPageVisible={inTerminalArea && tabKind(tab) === pageKind}
                             onReconnect={() => {
                               const server = servers.find((s) => s.id === tab.serverId)
                               if (server) { removeTab(tab.id); handleConnectServer(server) }
@@ -258,20 +287,21 @@ export default function App() {
                       </>
                     )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
 
-            {/* Estado vazio da página terminal */}
-            {showTerminal && tabs.length === 0 && (
+            {/* Estado vazio das páginas terminal/scripts */}
+            {inTerminalArea && currentTabs.length === 0 && (
               <div className="flex flex-col items-center justify-center flex-1 gap-3" style={{ color: 'var(--text-muted)' }}>
-                <p className="text-sm">No active sessions</p>
+                <p className="text-sm">{showScripts ? 'No script sessions' : 'No active sessions'}</p>
                 <button
-                  onClick={() => setActivePage('hosts')}
+                  onClick={() => setActivePage(showScripts ? 'snippets' : 'hosts')}
                   className="px-3 py-1.5 rounded-lg text-xs"
                   style={{ background: 'var(--accent)', color: '#fff' }}
                 >
-                  Go to Hosts
+                  {showScripts ? 'Go to Snippets' : 'Go to Hosts'}
                 </button>
               </div>
             )}
@@ -280,6 +310,7 @@ export default function App() {
             {showExport && <ExportPanel />}
             {showVault && <CredentialsPanel />}
             {showCloud && <CloudPanel />}
+            {showSnippets && <SnippetsPanel onBroadcast={handleBroadcastSnippet} />}
             {showSettings && <SettingsPanel onClose={() => setActivePage('hosts')} />}
           </div>
         </div>

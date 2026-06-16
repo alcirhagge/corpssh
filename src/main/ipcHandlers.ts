@@ -47,10 +47,14 @@ import {
   deleteCredential,
   resolveServerAuth,
   migrateEncryptionAtRest,
+  getSnippets,
+  saveSnippet,
+  deleteSnippet,
   type ServerRecord,
   type GroupRecord,
   type KeyRecord,
-  type CredentialRecord
+  type CredentialRecord,
+  type SnippetRecord
 } from './store'
 import {
   isCloudConfigured, cloudStatus, cloudSignUp, cloudSignIn, cloudSignOut,
@@ -151,6 +155,15 @@ export function setupIpcHandlers(): void {
     return key
   })
   ipcMain.handle('keys:delete', (_e, id: string) => { deleteKey(id); return true })
+
+  // --- Snippet CRUD ---
+  ipcMain.handle('snippets:list', () => getSnippets())
+  ipcMain.handle('snippets:save', (_e, snippet: SnippetRecord) => {
+    if (!snippet.id) snippet.id = generateId()
+    saveSnippet(snippet)
+    return snippet
+  })
+  ipcMain.handle('snippets:delete', (_e, id: string) => { deleteSnippet(id); return true })
 
   // --- Settings ---
   ipcMain.handle('settings:get', () => getSettings())
