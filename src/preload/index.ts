@@ -156,6 +156,13 @@ const api = {
       ipcRenderer.invoke('xml:importWithPassword', password)
   },
 
+  // mRemoteNG import (confCons.xml)
+  mremoteng: {
+    import: () => ipcRenderer.invoke('mremoteng:import'),
+    importWithPassword: (password: string) =>
+      ipcRenderer.invoke('mremoteng:importWithPassword', password)
+  },
+
   // Cloud account (opt-in)
   cloud: {
     configured: (): Promise<boolean> => ipcRenderer.invoke('cloud:configured'),

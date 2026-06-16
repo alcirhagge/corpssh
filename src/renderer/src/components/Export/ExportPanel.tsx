@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FileDown, FileUp, CheckCircle, XCircle, RefreshCw, FileCode, ShieldAlert, Lock, KeyRound } from 'lucide-react'
+import { FileDown, FileUp, CheckCircle, XCircle, RefreshCw, FileCode, ShieldAlert, Lock, KeyRound, Import } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 
 export default function ExportPanel() {
@@ -14,12 +14,16 @@ export default function ExportPanel() {
   // Set when an encrypted file was picked and we need its password to finish import.
   const [awaitingImportPassword, setAwaitingImportPassword] = useState(false)
   const [importPassword, setImportPassword] = useState('')
+  // mRemoteNG import: set when the file uses a custom (non-default) password.
+  const [awaitingMrngPassword, setAwaitingMrngPassword] = useState(false)
+  const [mrngPassword, setMrngPassword] = useState('')
 
-  const applyResult = (result: { servers: any[]; groups: any[] }) => {
+  const applyResult = (result: { servers: any[]; groups: any[]; skipped?: number }) => {
     result.servers.forEach(upsertServer)
     result.groups.forEach(upsertGroup)
     setState('ok')
-    setMessage(`Imported: ${result.servers.length} server${result.servers.length !== 1 ? 's' : ''}, ${result.groups.length} group${result.groups.length !== 1 ? 's' : ''}`)
+    const base = `Imported: ${result.servers.length} server${result.servers.length !== 1 ? 's' : ''}, ${result.groups.length} group${result.groups.length !== 1 ? 's' : ''}`
+    setMessage(result.skipped ? `${base} (${result.skipped} ignorado${result.skipped !== 1 ? 's' : ''}: protocolo não suportado)` : base)
   }
 
   const handleExport = async () => {
@@ -69,6 +73,32 @@ export default function ExportPanel() {
       applyResult(result as any)
       setAwaitingImportPassword(false)
       setImportPassword('')
+    } catch (e: any) { setState('error'); setMessage(e.message) }
+  }
+
+  const handleMrngImport = async () => {
+    setState('loading')
+    try {
+      const result = await window.api.mremoteng.import()
+      if (!result) { setState('idle'); return }
+      if ((result as any).needsPassword) {
+        setAwaitingMrngPassword(true)
+        setMrngPassword('')
+        setState('idle')
+        return
+      }
+      applyResult(result as any)
+    } catch (e: any) { setState('error'); setMessage(e.message) }
+  }
+
+  const handleMrngImportWithPassword = async () => {
+    if (!mrngPassword) return
+    setState('loading')
+    try {
+      const result = await window.api.mremoteng.importWithPassword(mrngPassword)
+      applyResult(result as any)
+      setAwaitingMrngPassword(false)
+      setMrngPassword('')
     } catch (e: any) { setState('error'); setMessage(e.message) }
   }
 
@@ -200,6 +230,59 @@ export default function ExportPanel() {
               onClick={handleImport}
               loading={state === 'loading'}
             />
+
+            <ActionCard
+              icon={<Import size={22} />}
+              title="Import from mRemoteNG"
+              description="Loads hosts, folders and passwords from a mRemoteNG confCons.xml. Existing data is kept."
+              buttonLabel="Import"
+              buttonColor="var(--purple)"
+              onClick={handleMrngImport}
+              loading={state === 'loading'}
+            />
+
+            {awaitingMrngPassword && (
+              <div
+                className="flex flex-col gap-2.5 p-4 rounded-xl animate-fade-in"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--purple)' }}
+              >
+                <div className="flex items-center gap-2" style={{ color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 }}>
+                  <KeyRound size={15} style={{ color: 'var(--purple)' }} />
+                  Senha do mRemoteNG
+                </div>
+                <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                  Este arquivo usa uma senha de criptografia personalizada. Digite a senha definida no mRemoteNG.
+                </p>
+                <input
+                  type="password"
+                  autoFocus
+                  value={mrngPassword}
+                  onChange={(e) => setMrngPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleMrngImportWithPassword() }}
+                  placeholder="Senha de criptografia"
+                  className="px-2.5 py-1.5 rounded-md"
+                  style={{ background: 'var(--bg-app)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 12 }}
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleMrngImportWithPassword}
+                    disabled={state === 'loading' || !mrngPassword}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium"
+                    style={{ background: 'var(--purple)', color: '#fff', fontSize: 13, opacity: !mrngPassword ? 0.6 : 1 }}
+                  >
+                    {state === 'loading' ? <RefreshCw size={12} className="animate-spin" /> : null}
+                    Importar
+                  </button>
+                  <button
+                    onClick={() => { setAwaitingMrngPassword(false); setMrngPassword(''); setState('idle') }}
+                    className="px-3 py-2 rounded-lg font-medium"
+                    style={{ background: 'var(--bg-app)', color: 'var(--text-secondary)', border: '1px solid var(--border)', fontSize: 13 }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
 
             {awaitingImportPassword && (
               <div

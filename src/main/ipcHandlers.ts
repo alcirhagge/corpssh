@@ -8,6 +8,9 @@ import {
   isEncryptedXML, encryptXMLEnvelope, decryptXMLEnvelope, type ImportResult
 } from './xmlManager'
 import {
+  parseMremotengXml, MremotengPasswordError, MREMOTENG_DEFAULT_PASSWORD
+} from './mremoteng'
+import {
   createSessionLog, closeSessionLog, listSessions, readSessionLog,
   deleteSession, cleanupOrphanedSessions
 } from './sessionLogger'
@@ -250,6 +253,54 @@ export function setupIpcHandlers(): void {
     pendingEncryptedImport = null
     const xml = decryptXMLEnvelope(enc, password) // throws on wrong password
     return applyImport(xml)
+  })
+
+  // --- mRemoteNG import (confCons.xml) ---
+  // New users migrating from mRemoteNG point us at their confCons.xml. We try
+  // the default password ("mR3m") first; if a secret won't decrypt we hold the
+  // file and ask the renderer for the custom password.
+  let pendingMremotengXml: string | null = null
+
+  const applyMremoteng = (xml: string, password: string) => {
+    const data = parseMremotengXml(xml, password) // throws MremotengPasswordError on bad pw
+    data.groups.forEach((g) => saveGroup(g))
+    data.servers.forEach((s) => saveServer(s))
+    return { servers: data.servers, groups: data.groups, skipped: data.skipped }
+  }
+
+  ipcMain.handle('mremoteng:import', async () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Importar do mRemoteNG (confCons.xml)',
+      filters: [{ name: 'mRemoteNG', extensions: ['xml'] }],
+      properties: ['openFile']
+    })
+    if (result.canceled || !result.filePaths.length) return null
+    const xml = fs.readFileSync(result.filePaths[0], 'utf-8')
+    try {
+      return applyMremoteng(xml, MREMOTENG_DEFAULT_PASSWORD)
+    } catch (e) {
+      if (e instanceof MremotengPasswordError) {
+        pendingMremotengXml = xml
+        return { needsPassword: true }
+      }
+      throw e
+    }
+  })
+
+  ipcMain.handle('mremoteng:importWithPassword', async (_e, password: string) => {
+    if (!pendingMremotengXml) throw new Error('Nenhuma importacao pendente')
+    const xml = pendingMremotengXml
+    try {
+      const out = applyMremoteng(xml, password) // throws MremotengPasswordError on bad pw
+      pendingMremotengXml = null
+      return out
+    } catch (e) {
+      if (e instanceof MremotengPasswordError) {
+        throw new Error('Senha incorreta. Tente a senha de criptografia definida no mRemoteNG.')
+      }
+      throw e
+    }
   })
 
   // --- Cloud account (opt-in) ---

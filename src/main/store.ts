@@ -64,11 +64,15 @@ export interface ServerRecord {
   host: string
   port: number
   username: string
+  protocol?: 'ssh' | 'rdp' | 'vnc'
   authMethod: 'password' | 'privateKey' | 'agent'
   password?: string
   privateKeyPath?: string
   privateKeyContent?: string
   passphrase?: string
+  vncPassword?: string
+  rdpDomain?: string
+  rdpFullscreen?: boolean
   groupId?: string
   color?: string
   tags?: string[]
