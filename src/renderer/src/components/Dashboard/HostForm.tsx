@@ -31,6 +31,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
   const [showKeySection, setShowKeySection] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [portFocused, setPortFocused] = useState(false)
 
   const isDirty = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -63,7 +64,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
     saveTimer.current = setTimeout(async () => {
       try {
         const derivedAuthMethod = form.privateKeyPath?.trim() ? 'privateKey' : 'password'
-        const toSave = { ...form, id: serverIdRef.current, name: form.name?.trim() || form.host!, authMethod: derivedAuthMethod }
+        const toSave = { ...form, id: serverIdRef.current, name: form.name?.trim() || form.host!, authMethod: derivedAuthMethod, port: form.port || defaultPort(form.protocol ?? 'ssh') }
         const saved = await window.api.servers.save(toSave as Server)
         upsertServer(saved)
         serverIdRef.current = saved.id
@@ -259,12 +260,25 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
               placeholder="IP or Hostname"
               style={{ flex: 1 }}
             />
-            <div style={{ width: 64 }}>
+            <div
+              style={{
+                width: portFocused ? 116 : 64,
+                flexShrink: 0,
+                transition: 'width 180ms cubic-bezier(0.16,1,0.3,1)',
+              }}
+            >
               <input
-                type="number"
-                value={form.port ?? defaultPort(form.protocol ?? 'ssh')}
-                onChange={(e) => set('port', parseInt(e.target.value) || defaultPort(form.protocol ?? 'ssh'))}
-                min={1} max={65535}
+                type="text"
+                inputMode="numeric"
+                value={form.port ?? ''}
+                placeholder={String(defaultPort(form.protocol ?? 'ssh'))}
+                onFocus={() => setPortFocused(true)}
+                onBlur={() => setPortFocused(false)}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/\D/g, '').slice(0, 5)
+                  set('port', digits === '' ? undefined : parseInt(digits, 10))
+                }}
+                style={{ textAlign: 'center', width: '100%' }}
               />
             </div>
           </div>

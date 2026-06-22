@@ -2,12 +2,21 @@ import { useEffect, useRef, useState, useCallback, memo } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { useAppStore } from '../../store/appStore'
 import type { Tab } from '../../types'
 import { Search, X, ChevronDown, ChevronUp } from 'lucide-react'
+
+// One hit from the buffer scan: absolute line (incl. scrollback), column where
+// the match starts, and the full line text (for the sidebar snippet).
+interface SearchMatch {
+  line: number
+  col: number
+  text: string
+}
+
+const SEARCH_PANEL_WIDTH = 288
 
 interface TerminalPaneProps {
   tab: Tab
@@ -33,13 +42,15 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
-  const searchAddonRef = useRef<SearchAddon | null>(null)
   const webglRef = useRef<WebglAddon | null>(null)
   const settings = useAppStore((s) => s.settings)
   const updateTab = useAppStore((s) => s.updateTab)
   const terminalFocusNonce = useAppStore((s) => s.terminalFocusNonce)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [matches, setMatches] = useState<SearchMatch[]>([])
+  const [activeIdx, setActiveIdx] = useState(0)
+  const activeRowRef = useRef<HTMLButtonElement>(null)
   const [isDisconnected, setIsDisconnected] = useState(false)
   const [copyNotice, setCopyNotice] = useState<{ chars: number; key: number } | null>(null)
 
@@ -89,7 +100,6 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
 
     const fitAddon = new FitAddon()
     const webLinksAddon = new WebLinksAddon()
-    const searchAddon = new SearchAddon()
 
     const terminal = new XTerm({
       fontFamily: settings.fontFamily || 'JetBrains Mono, Cascadia Code, monospace',
@@ -105,7 +115,6 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
 
     terminal.loadAddon(fitAddon)
     terminal.loadAddon(webLinksAddon)
-    terminal.loadAddon(searchAddon)
     terminal.open(container)
 
     // WebGL is attached lazily, only while this pane is the active/visible one
@@ -116,12 +125,17 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
-    searchAddonRef.current = searchAddon
 
     // Copy: Ctrl+C with selection, Ctrl+Shift+C
     // Paste: block \x16 from going to SSH — the paste DOM event handles the actual paste
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
+      // Ctrl/Cmd+F → toggle find bar (xterm would otherwise send ^F to the PTY)
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        setShowSearch((v) => !v)
+        return false
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && terminal.hasSelection()) {
         window.api.clipboard.writeText(terminal.getSelection())
         return false
@@ -285,11 +299,92 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
     requestAnimationFrame(() => terminalRef.current?.focus())
   }, [terminalFocusNonce])
 
-  const handleSearch = (direction: 'next' | 'prev') => {
-    if (!searchAddonRef.current || !searchQuery) return
-    if (direction === 'next') searchAddonRef.current.findNext(searchQuery)
-    else searchAddonRef.current.findPrevious(searchQuery)
+  // Scan the whole buffer (scrollback included) for every occurrence of the
+  // query. We do this by hand instead of leaning on the search addon because we
+  // want the full hit list to drive the sidebar — and because the addon's
+  // decoration overlay blanked the WebGL viewport on some GPUs.
+  const runScan = useCallback((query: string): SearchMatch[] => {
+    const term = terminalRef.current
+    if (!term || !query) return []
+    const buf = term.buffer.active
+    const needle = query.toLowerCase()
+    const out: SearchMatch[] = []
+    for (let i = 0; i < buf.length; i++) {
+      const line = buf.getLine(i)
+      if (!line) continue
+      const text = line.translateToString(true)
+      const hay = text.toLowerCase()
+      let from = hay.indexOf(needle)
+      while (from !== -1) {
+        out.push({ line: i, col: from, text })
+        from = hay.indexOf(needle, from + needle.length)
+        if (out.length > 2000) return out // safety cap on pathological queries
+      }
+    }
+    return out
+  }, [])
+
+  // Move the viewport to a hit, select it so it reads as the active match.
+  const jumpTo = useCallback((idx: number) => {
+    const term = terminalRef.current
+    const m = matches[idx]
+    if (!term || !m) return
+    setActiveIdx(idx)
+    term.scrollToLine(Math.max(0, m.line - Math.floor(term.rows / 2)))
+    term.select(m.col, m.line, searchQuery.length)
+  }, [matches, searchQuery])
+
+  const step = (dir: 1 | -1) => {
+    if (matches.length === 0) return
+    jumpTo((activeIdx + dir + matches.length) % matches.length)
   }
+
+  // Debounced live scan as you type. Jumps to the first hit; the terminal keeps
+  // all its content (no decorations, no clears) so nothing ever blanks out.
+  useEffect(() => {
+    if (!showSearch) return
+    if (!searchQuery) { setMatches([]); setActiveIdx(0); return }
+    const t = setTimeout(() => {
+      const found = runScan(searchQuery)
+      setMatches(found)
+      setActiveIdx(0)
+      const term = terminalRef.current
+      if (found.length && term) {
+        term.scrollToLine(Math.max(0, found[0].line - Math.floor(term.rows / 2)))
+        term.select(found[0].col, found[0].line, searchQuery.length)
+      } else {
+        term?.clearSelection()
+      }
+    }, 130)
+    return () => clearTimeout(t)
+  }, [searchQuery, showSearch, runScan])
+
+  // Reset when the bar closes
+  useEffect(() => {
+    if (showSearch) return
+    setMatches([])
+    setActiveIdx(0)
+    terminalRef.current?.clearSelection()
+  }, [showSearch])
+
+  // Refit the terminal whenever the side panel opens/closes so columns reflow
+  // into the freed/occupied width instead of being clipped behind the panel.
+  useEffect(() => {
+    if (!isActive || !isPageVisible) return
+    requestAnimationFrame(() => {
+      fitAddonRef.current?.fit()
+      const term = terminalRef.current
+      const dims = fitAddonRef.current?.proposeDimensions()
+      if (dims && dims.cols > 0 && dims.rows > 0 && tab.sessionId)
+        window.api.ssh.resize(tab.sessionId, dims.cols, dims.rows)
+      term?.refresh(0, (term?.rows ?? 1) - 1)
+    })
+  }, [showSearch, isActive, isPageVisible, tab.sessionId])
+
+  // Keep the active sidebar row in view as you step through hits
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [activeIdx])
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--terminal-bg)' }}>
@@ -332,7 +427,7 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
           key={copyNotice.key}
           className="absolute z-30 px-2.5 py-1 rounded-md text-xs font-medium pointer-events-none"
           style={{
-            top: showSearch ? 46 : 8, right: 8,
+            top: 8, right: showSearch ? SEARCH_PANEL_WIDTH + 8 : 8,
             background: 'var(--bg-elevated)', border: '1px solid var(--border)',
             color: 'var(--text-secondary)', boxShadow: '0 4px 12px rgba(0,0,0,0.25)'
           }}
@@ -342,36 +437,121 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
       )}
       {showSearch && (
         <div
-          className="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-lg px-2 py-1.5 shadow-xl"
-          style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+          className="absolute top-0 right-0 bottom-0 z-10 flex flex-col cs-glass-strong animate-slide-right"
+          style={{
+            width: SEARCH_PANEL_WIDTH,
+            background: 'var(--bg-surface)',
+            borderLeft: '1px solid var(--glass-border, var(--border))',
+            boxShadow: '-8px 0 24px rgba(0,0,0,0.28)',
+          }}
         >
-          <Search size={12} style={{ color: 'var(--text-muted)' }} />
-          <input
-            autoFocus
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') handleSearch(e.shiftKey ? 'prev' : 'next')
-              if (e.key === 'Escape') { setShowSearch(false); terminalRef.current?.focus() }
-            }}
-            placeholder="Search..."
-            className="text-xs w-40"
-            style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', padding: 0 }}
-          />
-          <button onClick={() => handleSearch('prev')} style={{ color: 'var(--text-secondary)' }}><ChevronUp size={13} /></button>
-          <button onClick={() => handleSearch('next')} style={{ color: 'var(--text-secondary)' }}><ChevronDown size={13} /></button>
-          <button onClick={() => setShowSearch(false)} style={{ color: 'var(--text-secondary)' }}><X size={13} /></button>
+          {/* Search header */}
+          <div className="px-3 pt-3 pb-2.5" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div
+              className="flex items-center gap-2 rounded-lg px-2.5 py-1.5"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+            >
+              <Search size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') step(e.shiftKey ? -1 : 1)
+                  if (e.key === 'Escape') { setShowSearch(false); terminalRef.current?.focus() }
+                }}
+                placeholder="Find in terminal…"
+                className="text-xs flex-1 min-w-0"
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', padding: 0 }}
+              />
+              <button
+                onClick={() => { setShowSearch(false); terminalRef.current?.focus() }}
+                className="flex items-center justify-center rounded"
+                style={{ color: 'var(--text-muted)', width: 18, height: 18, flexShrink: 0 }}
+              >
+                <X size={13} />
+              </button>
+            </div>
+            <div className="flex items-center justify-between mt-2 px-0.5">
+              <span
+                className="text-xs tabular-nums"
+                style={{ color: searchQuery && matches.length === 0 ? 'var(--warning, #f7b731)' : 'var(--text-muted)' }}
+              >
+                {!searchQuery ? 'Type to search'
+                  : matches.length === 0 ? 'No matches'
+                  : `${activeIdx + 1} of ${matches.length}`}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => step(-1)}
+                  disabled={matches.length === 0}
+                  className="flex items-center justify-center rounded-md"
+                  style={{ width: 22, height: 22, background: 'var(--bg-elevated)', color: 'var(--text-secondary)', opacity: matches.length === 0 ? 0.4 : 1 }}
+                  title="Previous (Shift+Enter)"
+                ><ChevronUp size={14} /></button>
+                <button
+                  onClick={() => step(1)}
+                  disabled={matches.length === 0}
+                  className="flex items-center justify-center rounded-md"
+                  style={{ width: 22, height: 22, background: 'var(--bg-elevated)', color: 'var(--text-secondary)', opacity: matches.length === 0 ? 0.4 : 1 }}
+                  title="Next (Enter)"
+                ><ChevronDown size={14} /></button>
+              </div>
+            </div>
+          </div>
+
+          {/* Results list */}
+          <div className="flex-1 overflow-y-auto py-1">
+            {matches.map((m, i) => {
+              const start = Math.max(0, m.col - 16)
+              const before = (start > 0 ? '…' : '') + m.text.slice(start, m.col)
+              const hit = m.text.slice(m.col, m.col + searchQuery.length)
+              const after = m.text.slice(m.col + searchQuery.length, m.col + searchQuery.length + 60)
+              const isActive = i === activeIdx
+              return (
+                <button
+                  key={`${m.line}-${m.col}-${i}`}
+                  ref={isActive ? activeRowRef : undefined}
+                  onClick={() => jumpTo(i)}
+                  className="w-full text-left flex items-start gap-2 px-3 py-1.5 transition-colors"
+                  style={{
+                    background: isActive ? 'var(--bg-active, rgba(76,116,255,0.16))' : 'transparent',
+                    borderLeft: `2px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
+                  }}
+                  onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg-hover)' }}
+                  onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+                >
+                  <span
+                    className="text-sm tabular-nums select-none mt-px"
+                    style={{ color: 'var(--text-faint, var(--text-muted))', minWidth: 30, textAlign: 'right' }}
+                  >{m.line + 1}</span>
+                  <span
+                    className="text-sm font-mono leading-snug break-all"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    {before}
+                    <mark style={{ background: '#f7b731', color: '#1a1300', borderRadius: 2, padding: '0 1px' }}>{hit}</mark>
+                    {after}
+                  </span>
+                </button>
+              )
+            })}
+            {searchQuery && matches.length === 0 && (
+              <div className="px-3 py-6 text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+                No matches in this buffer
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       <div
         ref={containerRef}
-        style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
-        onKeyDown={e => {
-          if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-            e.preventDefault()
-            setShowSearch(v => !v)
-          }
+        style={{
+          position: 'absolute', top: 0, bottom: 0, left: 0,
+          right: showSearch ? SEARCH_PANEL_WIDTH : 0,
+          overflow: 'hidden',
+          transition: 'right 180ms cubic-bezier(0.16,1,0.3,1)',
         }}
         tabIndex={0}
       />
