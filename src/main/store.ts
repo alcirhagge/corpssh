@@ -81,6 +81,7 @@ export interface ServerRecord {
   detectedOs?: string
   iconOverride?: string
   credentialId?: string
+  jumpHostId?: string  // optional bastion to tunnel through (ProxyJump -J)
   updatedAt?: number  // last local change (ms) — used for cloud LWW sync
 }
 

@@ -19,6 +19,9 @@ export interface SSHConnectionConfig {
   passphrase?: string
   /** TOFU host-key check. Default true; false accepts any key (legacy behavior). */
   strictHostKey?: boolean
+  /** Optional bastion to tunnel THROUGH before reaching this host (ProxyJump -J).
+   *  May itself carry a jumpHost, giving multi-hop chains for free. */
+  jumpHost?: SSHConnectionConfig
 }
 
 // Thrown when a host presents a different key than the one we pinned (possible
@@ -117,22 +120,136 @@ function makeNoDelaySocket(host: string, port: number): net.Socket {
   return sock
 }
 
-export function createSSHConnection(
+// Algorithm list shared by every connect path (live session, OS probe, and jump
+// hops). RSA-first host keys keep legacy switches happy; the wide kex/cipher sets
+// keep old appliances reachable. Single source of truth so the lists never drift.
+const SSH_ALGORITHMS: NonNullable<ConnectConfig['algorithms']> = {
+  kex: [
+    'curve25519-sha256', 'curve25519-sha256@libssh.org',
+    'ecdh-sha2-nistp256', 'ecdh-sha2-nistp384', 'ecdh-sha2-nistp521',
+    'diffie-hellman-group-exchange-sha256',
+    'diffie-hellman-group16-sha512', 'diffie-hellman-group15-sha512',
+    'diffie-hellman-group14-sha256', 'diffie-hellman-group14-sha1',
+    'diffie-hellman-group-exchange-sha1', 'diffie-hellman-group1-sha1'
+  ],
+  serverHostKey: [
+    'rsa-sha2-512', 'rsa-sha2-256', 'ssh-rsa', 'ssh-ed25519',
+    'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'ssh-dss'
+  ],
+  cipher: [
+    'aes128-gcm', 'aes128-gcm@openssh.com', 'aes256-gcm', 'aes256-gcm@openssh.com',
+    'aes128-ctr', 'aes192-ctr', 'aes256-ctr',
+    'aes256-cbc', 'aes192-cbc', 'aes128-cbc', '3des-cbc'
+  ],
+  hmac: ['hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1', 'hmac-md5']
+}
+
+// Fill in the auth fields of a ConnectConfig from a connection config. Shared so
+// jump hops authenticate exactly like the final target. Throws on unreadable key.
+function applyAuth(config: SSHConnectionConfig, cc: ConnectConfig): void {
+  if (config.authMethod === 'password' && config.password) {
+    cc.password = config.password
+  } else if (config.authMethod === 'privateKey') {
+    if (config.privateKeyContent) {
+      cc.privateKey = config.privateKeyContent
+    } else if (config.privateKeyPath) {
+      cc.privateKey = fs.readFileSync(config.privateKeyPath.replace('~', os.homedir()))
+    }
+    if (config.passphrase) cc.passphrase = config.passphrase
+  } else if (config.authMethod === 'agent') {
+    cc.agent = process.env.SSH_AUTH_SOCK || undefined
+  }
+}
+
+// Connect a single bastion over a socket we provide, resolving its ready Client.
+// Host-key TOFU is honored per the jump's own strictHostKey flag.
+function connectJumpClient(jump: SSHConnectionConfig, sock: net.Socket | NodeJS.ReadWriteStream): Promise<Client> {
+  return new Promise((resolve, reject) => {
+    const client = new Client()
+    let hostKeyError: HostKeyChangedError | null = null
+    const hostVerifier = (keyBuf: Buffer): boolean => {
+      const verdict = verifyHostKey(jump.host, jump.port, keyBuf)
+      if (verdict.status === 'changed') {
+        hostKeyError = new HostKeyChangedError(jump.host, jump.port, verdict.oldFp, verdict.newFp)
+        return false
+      }
+      return true
+    }
+    const cc: ConnectConfig = {
+      sock: sock as NodeJS.ReadableStream & NodeJS.WritableStream,
+      username: jump.username,
+      readyTimeout: 15000,
+      tryKeyboard: true,
+      algorithms: SSH_ALGORITHMS,
+      ...(jump.strictHostKey === false ? {} : { hostVerifier })
+    }
+    try { applyAuth(jump, cc) } catch (e) { reject(e); return }
+    client.on('keyboard-interactive', (_n, _i, _l, prompts, finish) => finish(prompts.map(() => jump.password ?? '')))
+    client.on('ready', () => resolve(client))
+    client.on('error', (err) => reject(hostKeyError ?? err))
+    client.connect(cc)
+  })
+}
+
+// Open a transport stream to (targetHost:targetPort) THROUGH a jump chain. The
+// jump may itself have a jumpHost, so we recurse to build multi-hop tunnels. The
+// returned `clients` are the bastions to tear down when the target session ends.
+async function openJumpTransport(
+  jump: SSHConnectionConfig, targetHost: string, targetPort: number
+): Promise<{ sock: NodeJS.ReadWriteStream; clients: Client[] }> {
+  // Reach the bastion itself: directly, or through its own jump chain.
+  let jumpSock: net.Socket | NodeJS.ReadWriteStream
+  const clients: Client[] = []
+  if (jump.jumpHost) {
+    const inner = await openJumpTransport(jump.jumpHost, jump.host, jump.port)
+    jumpSock = inner.sock
+    clients.push(...inner.clients)
+  } else {
+    jumpSock = makeNoDelaySocket(jump.host, jump.port)
+  }
+
+  const jumpClient = await connectJumpClient(jump, jumpSock)
+  clients.push(jumpClient)
+
+  const stream = await new Promise<NodeJS.ReadWriteStream>((resolve, reject) => {
+    jumpClient.forwardOut('127.0.0.1', 0, targetHost, targetPort, (err, s) => {
+      if (err) reject(err)
+      else resolve(s as unknown as NodeJS.ReadWriteStream)
+    })
+  })
+  return { sock: stream, clients }
+}
+
+export async function createSSHConnection(
   sessionId: string,
   config: SSHConnectionConfig,
   onNaturalClose?: () => void
 ): Promise<void> {
+  // Build the transport first. With a jumpHost we tunnel through one or more
+  // bastions (ProxyJump); otherwise a plain NODELAY TCP socket. The bastion
+  // Clients ride along so the target's teardown can close them too.
+  let sock: net.Socket | NodeJS.ReadWriteStream
+  let jumpClients: Client[] = []
+  if (config.jumpHost) {
+    const t = await openJumpTransport(config.jumpHost, config.host, config.port)
+    sock = t.sock
+    jumpClients = t.clients
+  } else {
+    sock = makeNoDelaySocket(config.host, config.port)
+  }
+  const endJumps = (): void => { for (const c of jumpClients) { try { c.end() } catch { /* gone */ } } }
+
   return new Promise((resolve, reject) => {
     const client = new Client()
 
-    // Pre-connected NODELAY socket (see makeNoDelaySocket). A socket-level error
-    // before the SSH handshake completes (ECONNREFUSED / unreachable) must still
-    // reject this promise, so forward it until ssh2 takes over on 'ready'.
-    const sock = makeNoDelaySocket(config.host, config.port)
+    // A socket-level error before the SSH handshake completes (ECONNREFUSED /
+    // unreachable, or a dropped jump tunnel) must still reject this promise, so
+    // forward it until ssh2 takes over on 'ready'.
     let handshakeDone = false
     sock.once('error', (err) => {
       if (!handshakeDone) {
         activeConnections.delete(sessionId)
+        endJumps()
         reject(err)
       }
     })
@@ -161,54 +278,8 @@ export function createSSHConnection(
       keepaliveCountMax: 6,
       ...(config.strictHostKey === false ? {} : { hostVerifier }),
       tryKeyboard: true,
-      algorithms: {
-        kex: [
-          'curve25519-sha256',
-          'curve25519-sha256@libssh.org',
-          'ecdh-sha2-nistp256',
-          'ecdh-sha2-nistp384',
-          'ecdh-sha2-nistp521',
-          'diffie-hellman-group-exchange-sha256',
-          'diffie-hellman-group16-sha512',
-          'diffie-hellman-group15-sha512',
-          'diffie-hellman-group14-sha256',
-          'diffie-hellman-group14-sha1',
-          'diffie-hellman-group-exchange-sha1',
-          'diffie-hellman-group1-sha1'
-        ],
-        // RSA first: some legacy switches (e.g. older Huawei VRP) offer a broken
-        // ECDSA host key that fails signature verification in ssh2. Preferring
-        // RSA/Ed25519 avoids that while keeping ECDSA available as a fallback.
-        serverHostKey: [
-          'rsa-sha2-512',
-          'rsa-sha2-256',
-          'ssh-rsa',
-          'ssh-ed25519',
-          'ecdsa-sha2-nistp256',
-          'ecdsa-sha2-nistp384',
-          'ecdsa-sha2-nistp521',
-          'ssh-dss'
-        ],
-        cipher: [
-          'aes128-gcm',
-          'aes128-gcm@openssh.com',
-          'aes256-gcm',
-          'aes256-gcm@openssh.com',
-          'aes128-ctr',
-          'aes192-ctr',
-          'aes256-ctr',
-          'aes256-cbc',
-          'aes192-cbc',
-          'aes128-cbc',
-          '3des-cbc'
-        ],
-        hmac: [
-          'hmac-sha2-256',
-          'hmac-sha2-512',
-          'hmac-sha1',
-          'hmac-md5'
-        ]
-      }
+      // RSA-first host keys keep legacy switches happy; see SSH_ALGORITHMS.
+      algorithms: SSH_ALGORITHMS
     }
 
     let remoteIdent = ''
@@ -260,6 +331,7 @@ export function createSSHConnection(
     client.on('error', (err: any) => {
       dbg(`[${config.host}] ERROR code=${err?.code ?? '?'} level=${err?.level ?? '?'} msg=${err?.message ?? err}`)
       activeConnections.delete(sessionId)
+      endJumps()
       // A rejected host key surfaces here as a generic handshake error — replace
       // it with the typed, actionable error so the UI can offer "re-trust".
       reject(hostKeyError ?? err)
@@ -267,6 +339,7 @@ export function createSSHConnection(
 
     client.on('close', () => {
       activeConnections.delete(sessionId)
+      endJumps()  // tear down any bastions this session tunneled through
       notifySessionClosed(sessionId)
       emitClosed(sessionId)
       onNaturalClose?.()

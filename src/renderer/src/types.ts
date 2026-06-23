@@ -24,6 +24,8 @@ export interface Server {
   detectedOs?: string
   iconOverride?: string
   credentialId?: string
+  /** Optional saved-server id to tunnel through before reaching this host (ProxyJump). */
+  jumpHostId?: string
 }
 
 export interface Credential {

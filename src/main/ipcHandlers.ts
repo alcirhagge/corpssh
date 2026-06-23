@@ -350,6 +350,25 @@ export function setupIpcHandlers(): void {
   ipcMain.handle('session:read', (_e, sessionId: string) => readSessionLog(sessionId))
   ipcMain.handle('session:delete', (_e, sessionId: string) => { deleteSession(sessionId); return true })
 
+  // Build a nested jumpHost connection config from a saved server id, resolving
+  // its vault credential and applying the global TOFU policy. Recurses so a
+  // bastion that itself has a jumpHost yields a full multi-hop chain. `seen`
+  // guards against a cyclic jumpHostId graph (A→B→A) becoming infinite.
+  const strict = (): boolean => getSettings().strictHostKey !== false
+  const buildJump = (jumpId: string | undefined, seen: Set<string>): any => {
+    if (!jumpId || seen.has(jumpId)) return undefined
+    seen.add(jumpId)
+    const srv = getServers().find((s) => s.id === jumpId && (s.protocol ?? 'ssh') === 'ssh')
+    if (!srv) return undefined
+    const auth = resolveServerAuth(srv.id)
+    return {
+      ...srv,
+      ...(auth ?? {}),
+      strictHostKey: strict(),
+      jumpHost: buildJump(srv.jumpHostId, seen)
+    }
+  }
+
   // --- SSH Connection ---
   ipcMain.handle('ssh:connect', async (_e, config) => {
     // If the host references a vault credential, its auth overrides the host's own.
@@ -359,7 +378,12 @@ export function setupIpcHandlers(): void {
 
     // Global TOFU host-key policy (default on) applied here so the renderer
     // never has to thread it through every connect call.
-    config = { ...config, strictHostKey: getSettings().strictHostKey !== false }
+    config = { ...config, strictHostKey: strict() }
+
+    // Resolve a ProxyJump bastion chain if this host references one.
+    if (config.jumpHostId) {
+      config = { ...config, jumpHost: buildJump(config.jumpHostId, new Set([config.id].filter(Boolean))) }
+    }
 
     const sessionId = generateId()
     const connectedAt = Date.now()

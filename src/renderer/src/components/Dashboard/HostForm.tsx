@@ -16,7 +16,7 @@ function getIconColor(server: Partial<Server>): string {
 }
 
 export default function HostForm({ onConnect }: { onConnect: (server: Server) => void }) {
-  const { rightPanel, setRightPanel, groups, credentials, upsertServer } = useAppStore()
+  const { rightPanel, setRightPanel, groups, credentials, servers, upsertServer } = useAppStore()
   const isEdit = rightPanel?.mode === 'edit'
   const editServer = isEdit ? (rightPanel as any).server as Server : null
   const defaultGroupId = rightPanel?.mode === 'new' ? (rightPanel as any).groupId : undefined
@@ -297,6 +297,21 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
               {credentials.map((c) => (
                 <option key={c.id} value={c.id}>🔑 {c.name} ({c.username})</option>
               ))}
+            </select>
+
+            {/* Jump host (ProxyJump): tunnel through a saved bastion to reach this host */}
+            <select
+              value={form.jumpHostId ?? ''}
+              onChange={(e) => set('jumpHostId', e.target.value || undefined)}
+              className="mb-2"
+              title="Conectar através de um bastion (ProxyJump)"
+            >
+              <option value="">Direct (no jump host)</option>
+              {servers
+                .filter((s) => (s.protocol ?? 'ssh') === 'ssh' && s.id !== serverIdRef.current)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>↪ via {s.name || s.host}</option>
+                ))}
             </select>
 
             {form.credentialId ? (
