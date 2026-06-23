@@ -66,6 +66,13 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
   const onAutoReconnectRef = useRef(onAutoReconnect)
   onAutoReconnectRef.current = onAutoReconnect
 
+  // The terminal is created once and outlives reconnects; these refs let the
+  // long-lived input/resize handlers always see the CURRENT session id and shell
+  // state instead of the values captured when the terminal was first built.
+  const sessionIdRef = useRef(tab.sessionId)
+  sessionIdRef.current = tab.sessionId
+  const shellOpenedRef = useRef(false)
+
   // Auto-dismiss the "copied N chars" toast
   useEffect(() => {
     if (!copyNotice) return
@@ -105,8 +112,12 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
     }
   }, [settings.terminalFgColor, settings.themeId])
 
+  // ── Effect A: build the terminal ONCE per tab and keep it across reconnects ──
+  // Disposing the xterm is what loses scrollback, so creation is decoupled from
+  // the session id. A reconnect only re-wires the SSH transport (Effect B); the
+  // on-screen buffer and history survive Wi-Fi/VPN blips and server reboots.
   useEffect(() => {
-    if (!containerRef.current || !tab.sessionId) return
+    if (!containerRef.current) return
 
     const container = containerRef.current
 
@@ -184,21 +195,23 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
     // Right-click = paste, always, in a single click. The selection was already
     // copied on mouseup (copy-on-select), so we just clear it and paste — no need
     // for the old two-step "first click copies+clears, second click pastes".
-    container.addEventListener('contextmenu', (e) => {
+    const onContextMenu = (e: MouseEvent) => {
       e.preventDefault()
       if (terminal.hasSelection()) terminal.clearSelection()
       const text = window.api.clipboard.readText()
       if (text) terminal.paste(text)
-    })
+    }
+    container.addEventListener('contextmenu', onContextMenu)
 
-    // Input → SSH. Command tracking + session logging now happen in the main
-    // process (see sshManager.sendInput / createShellSession), so the renderer
-    // no longer round-trips every keystroke and every output chunk back to main.
+    // Input → SSH. Command tracking + session logging happen in the main process
+    // (see sshManager.sendInput / createShellSession). The session id is read from
+    // a ref so this once-built handler always targets the CURRENT session after a
+    // reconnect swaps it in.
     terminal.onData(data => {
-      // Live broadcast: when enabled, the focused terminal mirrors every keystroke
-      // to all connected terminal sessions in the SAME strip (normal vs script).
-      // Only the focused pane fires onData, so no per-pane active guard is needed.
-      // State is read fresh via getState() to dodge a stale mount-time closure.
+      const sid = sessionIdRef.current
+      if (!sid) return
+      // Live broadcast: mirror every keystroke to all connected terminals in the
+      // SAME strip. Only the focused pane fires onData, so no active guard needed.
       const st = useAppStore.getState()
       if (st.broadcastInput) {
         const myKind = tab.kind ?? 'normal'
@@ -207,16 +220,54 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
         )
         for (const t of targets) window.api.ssh.input(t.sessionId!, data)
       } else {
-        window.api.ssh.input(tab.sessionId!, data)
+        window.api.ssh.input(sid, data)
       }
     })
 
+    const resizeObserver = new ResizeObserver(() => {
+      if (!shellOpenedRef.current) return
+      // Skip when the pane is collapsed to 0 (would push cols=0/rows=0 to the PTY
+      // and corrupt the remote display). Visibility-hidden panes keep their size,
+      // so background broadcast sessions still get a correct fit.
+      if (!container.clientWidth || !container.clientHeight) return
+      fitAddon.fit()
+      const dims = fitAddon.proposeDimensions()
+      if (dims && dims.cols > 0 && dims.rows > 0 && sessionIdRef.current)
+        window.api.ssh.resize(sessionIdRef.current, dims.cols, dims.rows)
+    })
+    resizeObserver.observe(container)
+
+    return () => {
+      resizeObserver.disconnect()
+      container.removeEventListener('paste', onPaste, true)
+      container.removeEventListener('mouseup', onMouseUp)
+      container.removeEventListener('contextmenu', onContextMenu)
+      webglRef.current?.dispose()
+      webglRef.current = null
+      canvasRef.current?.dispose()
+      canvasRef.current = null
+      terminal.dispose()
+      terminalRef.current = null
+    }
+  }, [])
+
+  // ── Effect B: wire the SSH transport to the (persistent) terminal ──
+  // Re-runs whenever the session id changes — i.e. on first connect AND on every
+  // in-place reconnect. It binds data/close listeners and opens a fresh shell,
+  // but never touches the xterm instance, so the buffer carries over untouched.
+  useEffect(() => {
+    const terminal = terminalRef.current
+    const fitAddon = fitAddonRef.current
+    if (!tab.sessionId || !terminal || !fitAddon) return
+
+    setIsDisconnected(false)  // a fresh transport clears any "session closed" overlay
+
     // SSH data → terminal
-    const unsubData = window.api.ssh.onData(tab.sessionId!, data => {
+    const unsubData = window.api.ssh.onData(tab.sessionId, data => {
       terminal.write(data)
     })
 
-    const unsubClosed = window.api.ssh.onClosed(tab.sessionId!, () => {
+    const unsubClosed = window.api.ssh.onClosed(tab.sessionId, () => {
       // Unexpected drop (intentional closes are suppressed in main). Auto-reconnect
       // in place when enabled; otherwise show the manual reconnect overlay.
       if (autoReconnectRef.current) {
@@ -229,26 +280,12 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
       updateTab(tab.id, { status: 'disconnected' })
     })
 
-    let shellOpened = false
-    const resizeObserver = new ResizeObserver(() => {
-      if (!shellOpened) return
-      // Skip when the pane is collapsed to 0 (would push cols=0/rows=0 to the PTY
-      // and corrupt the remote display). Visibility-hidden panes keep their size,
-      // so background broadcast sessions still get a correct fit.
-      if (!container.clientWidth || !container.clientHeight) return
-      fitAddon.fit()
-      const dims = fitAddon.proposeDimensions()
-      if (dims && dims.cols > 0 && dims.rows > 0 && tab.sessionId)
-        window.api.ssh.resize(tab.sessionId, dims.cols, dims.rows)
-    })
-    resizeObserver.observe(container)
-
+    shellOpenedRef.current = false
     const timer = setTimeout(() => {
-      if (!containerRef.current) return
       fitAddon.fit()
       const cols = terminal.cols || 80
       const rows = terminal.rows || 24
-      shellOpened = true
+      shellOpenedRef.current = true
       window.api.ssh.shell(tab.sessionId!, cols, rows)
         .then(() => {
           // Auto-enable ls/grep/ip colors on Linux hosts (uses the detected OS,
@@ -273,15 +310,6 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
       clearTimeout(timer)
       unsubData()
       unsubClosed()
-      resizeObserver.disconnect()
-      container.removeEventListener('paste', onPaste, true)
-      container.removeEventListener('mouseup', onMouseUp)
-      webglRef.current?.dispose()
-      webglRef.current = null
-      canvasRef.current?.dispose()
-      canvasRef.current = null
-      terminal.dispose()
-      terminalRef.current = null
     }
   }, [tab.sessionId])
 
