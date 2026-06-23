@@ -64,6 +64,9 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
   const [transferring, setTransferring] = useState(false)
   const [transferMsg, setTransferMsg] = useState('')
 
+  // Remote files currently open for inline editing (each save re-uploads).
+  const [editing, setEditing] = useState<Set<string>>(new Set())
+
   const loadRemote = useCallback(async (path: string) => {
     if (!tab.sessionId) return
     setRemoteLoading(true)
@@ -103,6 +106,53 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
     }
     window.api.local.homedir().then((home) => loadLocal(home))
   }, [loadRemote, loadLocal, tab.sessionId])
+
+  // A remote file open for editing re-uploaded on save → flash a confirmation.
+  useEffect(() => {
+    const off = window.api.sftp.onEditSync(({ remotePath: rp }) => {
+      const base = rp.split('/').pop() || rp
+      setTransferMsg(`Saved ${base} → server`)
+      setTimeout(() => setTransferMsg(''), 2500)
+      // If the saved file lives in the open folder, refresh sizes/timestamps.
+      if (getParent(rp) === remotePath) loadRemote(remotePath)
+    })
+    return () => { off() }
+  }, [remotePath, loadRemote])
+
+  // Open a remote file for inline editing: download → default editor → watch+sync.
+  const editRemoteFile = async (entry: PaneEntry) => {
+    if (!tab.sessionId || entry.type !== 'file') return
+    const full = joinPath(remotePath, entry.name)
+    try {
+      await window.api.sftp.editRemote(tab.sessionId, full)
+      setEditing((prev) => new Set(prev).add(full))
+      setTransferMsg(`Editing ${entry.name} — saves sync to server`)
+      setTimeout(() => setTransferMsg(''), 3000)
+    } catch (e: any) {
+      setError(`Edit: ${e.message}`)
+    }
+  }
+
+  // Drop files/folders from the OS file manager straight onto the SERVER pane.
+  const handleDropToRemote = async (paths: string[]) => {
+    if (!tab.sessionId || paths.length === 0) return
+    setTransferring(true)
+    setError(null)
+    try {
+      for (const src of paths) {
+        const base = src.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || src
+        setTransferMsg(`Uploading ${base}…`)
+        await window.api.sftp.uploadDirect(tab.sessionId, src, joinPath(remotePath, base))
+      }
+      setTransferMsg(`Uploaded ${paths.length} item${paths.length === 1 ? '' : 's'}`)
+      setTimeout(() => setTransferMsg(''), 2500)
+      loadRemote(remotePath)
+    } catch (e: any) {
+      setError(`Upload: ${e.message}`)
+    } finally {
+      setTransferring(false)
+    }
+  }
 
   const handleUpload = async () => {
     if (!selectedLocal || !tab.sessionId) return
@@ -254,6 +304,9 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
           canGoParent={remotePath !== '/'}
           onRefresh={() => loadRemote(remotePath)}
           currentPath={remotePath}
+          onOpenFile={editRemoteFile}
+          onDropFiles={handleDropToRemote}
+          editingPaths={editing}
         />
       </div>
     </div>
@@ -262,7 +315,8 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
 
 function FilePane({
   title, path, entries, loading, selected,
-  onNavigate, onSelect, onParent, canGoParent, onRefresh, currentPath
+  onNavigate, onSelect, onParent, canGoParent, onRefresh, currentPath,
+  onOpenFile, onDropFiles, editingPaths
 }: {
   title: string
   path: string
@@ -275,11 +329,41 @@ function FilePane({
   canGoParent: boolean
   onRefresh: () => void
   currentPath: string
+  /** Open a file (double-click) — server pane only, edits sync back. */
+  onOpenFile?: (entry: PaneEntry) => void
+  /** Receive OS-dragged file/folder paths dropped onto the pane. */
+  onDropFiles?: (paths: string[]) => void
+  /** Remote full paths currently open for editing (shows a live badge). */
+  editingPaths?: Set<string>
 }) {
   const displayPath = path.length > 32 ? '…' + path.slice(-30) : path
+  const [dragOver, setDragOver] = useState(false)
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (!onDropFiles) return
+    // Electron exposes the real filesystem path on dropped File objects.
+    const paths = Array.from(e.dataTransfer.files).map((f) => (f as File & { path: string }).path).filter(Boolean)
+    if (paths.length) onDropFiles(paths)
+  }
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden" style={{ minWidth: 0 }}>
+    <div
+      className="flex flex-col flex-1 overflow-hidden relative"
+      style={{ minWidth: 0, outline: dragOver ? '2px dashed var(--accent)' : 'none', outlineOffset: -2 }}
+      onDragOver={onDropFiles ? (e) => { e.preventDefault(); setDragOver(true) } : undefined}
+      onDragLeave={onDropFiles ? () => setDragOver(false) : undefined}
+      onDrop={onDropFiles ? handleDrop : undefined}
+    >
+      {dragOver && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"
+          style={{ background: 'var(--accent-subtle)', color: 'var(--accent)', fontSize: 12, fontWeight: 600 }}
+        >
+          Drop to upload here
+        </div>
+      )}
       {/* Toolbar */}
       <div
         className="flex items-center gap-1 px-2 py-1.5 flex-shrink-0"
@@ -348,8 +432,11 @@ function FilePane({
                 onClick={() => onSelect(entry)}
                 onDoubleClick={() => {
                   if (isDir) onNavigate(joinPath(currentPath, entry.name))
+                  else if (onOpenFile) onOpenFile(entry)
                 }}
-                title={isDir ? 'Click to select · double-click to open' : entry.name}
+                title={isDir
+                  ? 'Click to select · double-click to open'
+                  : onOpenFile ? 'Double-click to edit (saves sync to server)' : entry.name}
                 onMouseEnter={(e) => {
                   if (!isSelected) e.currentTarget.style.background = 'var(--bg-hover)'
                 }}
@@ -367,6 +454,15 @@ function FilePane({
                 >
                   {entry.name}
                 </span>
+                {!isDir && editingPaths?.has(joinPath(currentPath, entry.name)) && (
+                  <span
+                    className="flex-shrink-0 text-xs px-1 rounded"
+                    style={{ background: 'var(--accent-subtle)', color: 'var(--accent)', fontSize: 9, fontWeight: 700 }}
+                    title="Open in editor — saves sync back"
+                  >
+                    EDIT
+                  </span>
+                )}
                 {!isDir && (
                   <span className="flex-shrink-0 text-xs" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
                     {formatSize(entry.size)}

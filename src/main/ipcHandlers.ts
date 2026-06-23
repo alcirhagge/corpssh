@@ -30,7 +30,8 @@ import {
   getRemoteHome,
   deleteSFTPItem,
   detectRemoteOs,
-  detectOsFromSession
+  detectOsFromSession,
+  onSessionClosed
 } from './sshManager'
 import { forgetHostKey, trustHostKey } from './knownHosts'
 import { startTunnel, stopTunnel, listTunnels, type TunnelConfig } from './portForward'
@@ -541,6 +542,58 @@ export function setupIpcHandlers(): void {
 
   ipcMain.handle('sftp:reveal', async (_e, localPath: string) => {
     shell.showItemInFolder(localPath)
+  })
+
+  // --- Edit a remote file inline ---
+  // Download it to a private temp dir, open it in the OS default editor, and watch
+  // the file: each save re-uploads it to the server. The watch is on the temp DIR
+  // (not the file) so it survives editors that save atomically via rename. Watchers
+  // are torn down on stopEdit and when the owning SSH session closes.
+  const activeEdits = new Map<string, fs.FSWatcher>()  // `${sessionId}|${remotePath}` → watcher
+
+  onSessionClosed((sessionId) => {
+    for (const [key, watcher] of activeEdits) {
+      if (key.startsWith(`${sessionId}|`)) { try { watcher.close() } catch {} activeEdits.delete(key) }
+    }
+  })
+
+  ipcMain.handle('sftp:editRemote', async (_e, sessionId: string, remotePath: string) => {
+    const base = path.basename(remotePath) || 'remote-file'
+    const dir = path.join(os.tmpdir(), `corpssh-edit-${generateId()}`)
+    fs.mkdirSync(dir, { recursive: true })
+    const local = path.join(dir, base)
+
+    await downloadFile(sessionId, remotePath, local)
+    await shell.openPath(local)
+
+    const key = `${sessionId}|${remotePath}`
+    try { activeEdits.get(key)?.close() } catch {}
+
+    let lastMtime = 0
+    let timer: NodeJS.Timeout | null = null
+    const watcher = fs.watch(dir, (_evt, fname) => {
+      // Only react to OUR file; ignore editor swap/backup files in the same dir.
+      if (fname && fname.toString() !== base) return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(async () => {
+        try {
+          const st = fs.statSync(local)
+          if (st.mtimeMs === lastMtime) return  // de-dupe the burst of fs events per save
+          lastMtime = st.mtimeMs
+          await uploadFile(sessionId, local, remotePath)
+          BrowserWindow.getAllWindows()[0]?.webContents.send('sftp:editSync', { remotePath, at: Date.now() })
+        } catch { /* file mid-write or session gone — next event retries */ }
+      }, 350)
+    })
+    activeEdits.set(key, watcher)
+    return local
+  })
+
+  ipcMain.handle('sftp:stopEdit', (_e, sessionId: string, remotePath: string) => {
+    const key = `${sessionId}|${remotePath}`
+    try { activeEdits.get(key)?.close() } catch {}
+    activeEdits.delete(key)
+    return true
   })
 
   // --- File dialog for key selection ---

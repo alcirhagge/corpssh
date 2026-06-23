@@ -115,7 +115,15 @@ const api = {
     uploadDirect: (sessionId: string, localPath: string, remotePath: string) =>
       ipcRenderer.invoke('sftp:uploadDirect', sessionId, localPath, remotePath),
     downloadDirect: (sessionId: string, remotePath: string, localPath: string) =>
-      ipcRenderer.invoke('sftp:downloadDirect', sessionId, remotePath, localPath)
+      ipcRenderer.invoke('sftp:downloadDirect', sessionId, remotePath, localPath),
+    editRemote: (sessionId: string, remotePath: string): Promise<string> =>
+      ipcRenderer.invoke('sftp:editRemote', sessionId, remotePath),
+    stopEdit: (sessionId: string, remotePath: string) =>
+      ipcRenderer.invoke('sftp:stopEdit', sessionId, remotePath),
+    onEditSync: (cb: (p: { remotePath: string; at: number }) => void) => {
+      ipcRenderer.on('sftp:editSync', (_e, p) => cb(p))
+      return () => ipcRenderer.removeAllListeners('sftp:editSync')
+    }
   },
 
   // Local filesystem
