@@ -70,6 +70,7 @@ import {
 import { syncNow } from './cloudSync'
 import * as path from 'path'
 import * as os from 'os'
+import * as net from 'net'
 
 function generateId(): string {
   return randomUUID()
@@ -458,6 +459,20 @@ export function setupIpcHandlers(): void {
   // --- Command history (Ctrl+R reverse search) ---
   ipcMain.handle('history:list', (_e, query?: string, limit?: number) => listCommands(query ?? '', limit ?? 200))
   ipcMain.handle('history:clear', () => { clearCommandHistory(); return true })
+
+  // --- Network RTT (status-bar latency) ---
+  // Time a raw TCP connect to host:port. Deliberately NOT an SSH-level ping: it
+  // touches no channels, so it's safe against single-session appliances (switches,
+  // OLTs). Returns milliseconds, or -1 on error/timeout.
+  ipcMain.handle('net:rtt', (_e, host: string, port: number) => new Promise<number>((resolve) => {
+    const start = Date.now()
+    let done = false
+    const finish = (v: number): void => { if (done) return; done = true; try { sock.destroy() } catch {} resolve(v) }
+    const sock = net.connect({ host, port: port || 22 })
+    sock.once('connect', () => finish(Date.now() - start))
+    sock.once('error', () => finish(-1))
+    setTimeout(() => finish(-1), 4000)
+  }))
 
   // ─── Port forwarding (tunnels) ──────────────────────────────────────────────
   ipcMain.handle('forward:start', async (_e, sessionId: string, cfg: TunnelConfig) => {

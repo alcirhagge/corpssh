@@ -78,6 +78,7 @@ const api = {
     historyList: (query?: string, limit?: number): Promise<{ cmd: string; ts: number; count: number }[]> =>
       ipcRenderer.invoke('history:list', query, limit),
     historyClear: () => ipcRenderer.invoke('history:clear'),
+    rtt: (host: string, port: number): Promise<number> => ipcRenderer.invoke('net:rtt', host, port),
     onData: (sessionId: string, cb: (data: string) => void) => {
       const channel = `ssh:data:${sessionId}`
       ipcRenderer.on(channel, (_e, data) => cb(data))

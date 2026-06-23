@@ -59,6 +59,7 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
   const [isDisconnected, setIsDisconnected] = useState(false)
   const [copyNotice, setCopyNotice] = useState<{ chars: number; key: number } | null>(null)
   const [showHistory, setShowHistory] = useState(false)
+  const [rtt, setRtt] = useState<number | null>(null)
 
   // Refs so the long-lived onClosed handler (bound once per sessionId) always
   // reads the CURRENT auto-reconnect settings instead of mount-time values.
@@ -80,6 +81,21 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
     const t = setTimeout(() => setCopyNotice(null), 1400)
     return () => clearTimeout(t)
   }, [copyNotice])
+
+  // Poll TCP round-trip time to the host while this pane is active & live, for
+  // the latency pill. Raw TCP (no SSH channel) so it's safe on appliances.
+  useEffect(() => {
+    if (!isActive || !isPageVisible || isDisconnected) return
+    const srv = useAppStore.getState().servers.find((s) => s.id === tab.serverId)
+    const port = srv?.port ?? 22
+    let alive = true
+    const ping = (): void => {
+      window.api.ssh.rtt(tab.serverHost, port).then((ms) => { if (alive) setRtt(ms) }).catch(() => {})
+    }
+    ping()
+    const id = setInterval(ping, 5000)
+    return () => { alive = false; clearInterval(id) }
+  }, [isActive, isPageVisible, isDisconnected, tab.serverId, tab.serverHost])
 
   const getTheme = useCallback(() => {
     const s = getComputedStyle(document.documentElement)
@@ -166,6 +182,28 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
         e.preventDefault()
         setShowHistory(true)
+        return false
+      }
+      // Ctrl/Cmd +/-/0 → live terminal font zoom (ephemeral per pane; Ctrl+0
+      // resets to the saved default). Reflows columns and tells the PTY the new
+      // geometry so wrapping stays correct.
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0')) {
+        e.preventDefault()
+        const t = terminalRef.current
+        const fa = fitAddonRef.current
+        if (t) {
+          const cur = t.options.fontSize ?? 14
+          const next = e.key === '0'
+            ? (useAppStore.getState().settings.fontSize || 14)
+            : e.key === '-' ? Math.max(8, cur - 1) : Math.min(32, cur + 1)
+          if (next !== cur) {
+            t.options.fontSize = next
+            fa?.fit()
+            const dims = fa?.proposeDimensions()
+            const sid = sessionIdRef.current
+            if (dims && dims.cols > 0 && dims.rows > 0 && sid) window.api.ssh.resize(sid, dims.cols, dims.rows)
+          }
+        }
         return false
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && terminal.hasSelection()) {
@@ -531,6 +569,25 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
           }}
         >
           copied {copyNotice.chars} {copyNotice.chars === 1 ? 'char' : 'chars'} to clipboard
+        </div>
+      )}
+      {isActive && rtt !== null && (
+        <div
+          className="absolute z-20 px-2 py-0.5 rounded-md text-xs font-medium tabular-nums pointer-events-none flex items-center gap-1"
+          style={{
+            bottom: 6, left: 6, fontSize: 10,
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+            color: rtt < 0 ? 'var(--text-muted)'
+              : rtt < 80 ? 'var(--success)'
+              : rtt < 200 ? 'var(--warning, #f7b731)' : 'var(--error)'
+          }}
+          title="TCP round-trip time to the host"
+        >
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+            background: rtt < 0 ? 'var(--text-muted)' : rtt < 80 ? 'var(--success)' : rtt < 200 ? 'var(--warning, #f7b731)' : 'var(--error)'
+          }} />
+          {rtt < 0 ? 'offline' : `${rtt} ms`}
         </div>
       )}
       {showHistory && (
