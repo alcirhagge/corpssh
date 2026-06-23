@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { X, Terminal, Palette, Key, Info, Pipette } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { X, Terminal, Palette, Key, Info, Pipette, ShieldCheck, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import { THEMES, applyTheme, getThemeBase } from '../../themes'
 import type { AppSettings } from '../../types'
@@ -10,7 +10,7 @@ interface SettingsPanelProps {
   onClose: () => void
 }
 
-type Section = 'appearance' | 'terminal' | 'keys' | 'about'
+type Section = 'appearance' | 'terminal' | 'security' | 'keys' | 'about'
 
 // Quick-pick terminal text colors (classic phosphor / amber / paper / cyan)
 const TERM_COLOR_PRESETS = ['#3bdc6b', '#ffb000', '#e8eaf0', '#5ad7ff', '#ff6b9d']
@@ -78,6 +78,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           {([
             ['appearance', 'Appearance', <Palette size={13} />],
             ['terminal', 'Terminal', <Terminal size={13} />],
+            ['security', 'Security', <ShieldCheck size={13} />],
             ['keys', 'SSH Keys', <Key size={13} />],
             ['about', 'About', <Info size={13} />]
           ] as const).map(([id, label, icon]) => (
@@ -96,7 +97,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
             <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {section === 'appearance' ? 'Appearance' : section === 'terminal' ? 'Terminal' : section === 'keys' ? 'SSH Keys' : 'About'}
+              {section === 'appearance' ? 'Appearance' : section === 'terminal' ? 'Terminal' : section === 'security' ? 'Security' : section === 'keys' ? 'SSH Keys' : 'About'}
             </h3>
             <button onClick={onClose} className="flex items-center justify-center w-6 h-6 rounded" style={{ color: 'var(--text-secondary)' }}>
               <X size={14} />
@@ -273,6 +274,19 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               </div>
             )}
 
+            {section === 'security' && (
+              <div className="flex flex-col gap-4">
+                <SettingRow label="Verify host keys (TOFU)" description="Pin each server's key and warn on a mismatch">
+                  <Toggle value={form.strictHostKey !== false} onChange={v => set('strictHostKey', v)} />
+                </SettingRow>
+                <SettingRow label="Auto-reconnect" description="Silently reconnect a dropped session in place">
+                  <Toggle value={form.autoReconnect !== false} onChange={v => set('autoReconnect', v)} />
+                </SettingRow>
+                <div style={{ height: 1, background: 'var(--border-subtle)' }} />
+                <KnownHostsManager />
+              </div>
+            )}
+
             {section === 'keys' && (
               <div className="flex flex-col gap-3">
                 <div className="flex justify-between items-center">
@@ -367,6 +381,71 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+interface KnownHost { host: string; port: number; fp: string }
+
+function KnownHostsManager() {
+  const [hosts, setHosts] = useState<KnownHost[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const reload = () => {
+    window.api.ssh.listKnownHosts()
+      .then((list) => setHosts(list))
+      .catch(() => setHosts([]))
+      .finally(() => setLoading(false))
+  }
+  useEffect(reload, [])
+
+  const forget = async (h: KnownHost) => {
+    await window.api.ssh.forgetHostKey(h.host, h.port)
+    setHosts((prev) => prev.filter((x) => !(x.host === h.host && x.port === h.port)))
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>Trusted host keys</p>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          {loading ? '…' : `${hosts.length} pinned`}
+        </p>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        Forget a host to re-pin its key on the next connect (e.g. a rebuilt server).
+      </p>
+      {!loading && hosts.length === 0 ? (
+        <div className="text-xs text-center py-6" style={{ color: 'var(--text-muted)' }}>
+          No pinned hosts yet
+        </div>
+      ) : (
+        hosts.map((h) => (
+          <div
+            key={`${h.host}:${h.port}`}
+            className="flex items-center gap-3 px-3 py-2 rounded-lg"
+            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+          >
+            <ShieldCheck size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                {h.host}{h.port !== 22 ? `:${h.port}` : ''}
+              </p>
+              <p className="text-xs truncate font-mono" style={{ color: 'var(--text-muted)', fontSize: 10 }} title={h.fp}>
+                {h.fp}
+              </p>
+            </div>
+            <button
+              onClick={() => forget(h)}
+              title="Forget this host key"
+              className="flex items-center justify-center w-6 h-6 rounded flex-shrink-0"
+              style={{ color: 'var(--error)', background: 'transparent' }}
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        ))
+      )}
     </div>
   )
 }

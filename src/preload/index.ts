@@ -74,6 +74,7 @@ const api = {
     detectOs: (config: unknown) => ipcRenderer.invoke('ssh:detectOs', config),
     forgetHostKey: (host: string, port: number) => ipcRenderer.invoke('ssh:forgetHostKey', host, port),
     trustHostKey: (host: string, port: number, fp: string) => ipcRenderer.invoke('ssh:trustHostKey', host, port, fp),
+    listKnownHosts: (): Promise<{ host: string; port: number; fp: string }[]> => ipcRenderer.invoke('ssh:listKnownHosts'),
     onData: (sessionId: string, cb: (data: string) => void) => {
       const channel = `ssh:data:${sessionId}`
       ipcRenderer.on(channel, (_e, data) => cb(data))

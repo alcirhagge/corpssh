@@ -33,7 +33,7 @@ import {
   detectOsFromSession,
   onSessionClosed
 } from './sshManager'
-import { forgetHostKey, trustHostKey } from './knownHosts'
+import { forgetHostKey, trustHostKey, listKnownHosts } from './knownHosts'
 import { startTunnel, stopTunnel, listTunnels, type TunnelConfig } from './portForward'
 import {
   getServers,
@@ -452,6 +452,7 @@ export function setupIpcHandlers(): void {
     trustHostKey(host, port, fp)
     return true
   })
+  ipcMain.handle('ssh:listKnownHosts', () => listKnownHosts())
 
   // ─── Port forwarding (tunnels) ──────────────────────────────────────────────
   ipcMain.handle('forward:start', async (_e, sessionId: string, cfg: TunnelConfig) => {

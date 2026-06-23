@@ -82,3 +82,23 @@ export function forgetHostKey(host: string, port: number): void {
   delete store[keyFor(host, port)]
   persist(store)
 }
+
+export interface KnownHostEntry {
+  host: string
+  port: number
+  fp: string
+}
+
+// List every pinned host for the management UI. Keys are "host:port"; the host
+// may itself contain colons (IPv6), so split on the LAST colon.
+export function listKnownHosts(): KnownHostEntry[] {
+  const store = load()
+  return Object.entries(store)
+    .map(([key, fp]) => {
+      const i = key.lastIndexOf(':')
+      const host = i >= 0 ? key.slice(0, i) : key
+      const port = i >= 0 ? parseInt(key.slice(i + 1), 10) || 22 : 22
+      return { host, port, fp }
+    })
+    .sort((a, b) => a.host.localeCompare(b.host))
+}
