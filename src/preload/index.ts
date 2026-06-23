@@ -72,6 +72,8 @@ const api = {
       ipcRenderer.invoke('ssh:resize', sessionId, cols, rows),
     disconnect: (sessionId: string) => ipcRenderer.invoke('ssh:disconnect', sessionId),
     detectOs: (config: unknown) => ipcRenderer.invoke('ssh:detectOs', config),
+    forgetHostKey: (host: string, port: number) => ipcRenderer.invoke('ssh:forgetHostKey', host, port),
+    trustHostKey: (host: string, port: number, fp: string) => ipcRenderer.invoke('ssh:trustHostKey', host, port, fp),
     onData: (sessionId: string, cb: (data: string) => void) => {
       const channel = `ssh:data:${sessionId}`
       ipcRenderer.on(channel, (_e, data) => cb(data))

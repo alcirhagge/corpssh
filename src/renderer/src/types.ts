@@ -73,6 +73,10 @@ export interface AppSettings {
   terminalFgColor?: string
   /** Auto-enable ls/grep/ip colors on connect for Linux hosts. Default true. */
   terminalAutoColor?: boolean
+  /** TOFU host-key verification. Default true. */
+  strictHostKey?: boolean
+  /** Auto-reconnect a session dropped unexpectedly. Default true. */
+  autoReconnect?: boolean
   remoteLogConfig?: RemoteLogConfig
 }
 

@@ -3,6 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { useAppStore } from '../../store/appStore'
 import type { Tab } from '../../types'
@@ -22,6 +23,9 @@ interface TerminalPaneProps {
   tab: Tab
   isActive: boolean
   isPageVisible: boolean
+  /** When true, an unexpected drop triggers onAutoReconnect instead of waiting for a click. */
+  autoReconnect: boolean
+  onAutoReconnect: () => void
   onReconnect: () => void
   onClose: () => void
 }
@@ -38,11 +42,12 @@ const COLOR_PRELUDE =
   " alias ls='ls --color=auto' 2>/dev/null; alias grep='grep --color=auto' 2>/dev/null;" +
   " command ip -c -V >/dev/null 2>&1 && alias ip='ip -c'; clear\n"
 
-function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: TerminalPaneProps) {
+function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoReconnect, onReconnect, onClose }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const webglRef = useRef<WebglAddon | null>(null)
+  const canvasRef = useRef<CanvasAddon | null>(null)
   const settings = useAppStore((s) => s.settings)
   const updateTab = useAppStore((s) => s.updateTab)
   const terminalFocusNonce = useAppStore((s) => s.terminalFocusNonce)
@@ -53,6 +58,13 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
   const activeRowRef = useRef<HTMLButtonElement>(null)
   const [isDisconnected, setIsDisconnected] = useState(false)
   const [copyNotice, setCopyNotice] = useState<{ chars: number; key: number } | null>(null)
+
+  // Refs so the long-lived onClosed handler (bound once per sessionId) always
+  // reads the CURRENT auto-reconnect settings instead of mount-time values.
+  const autoReconnectRef = useRef(autoReconnect)
+  autoReconnectRef.current = autoReconnect
+  const onAutoReconnectRef = useRef(onAutoReconnect)
+  onAutoReconnectRef.current = onAutoReconnect
 
   // Auto-dismiss the "copied N chars" toast
   useEffect(() => {
@@ -192,6 +204,13 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
     })
 
     const unsubClosed = window.api.ssh.onClosed(tab.sessionId!, () => {
+      // Unexpected drop (intentional closes are suppressed in main). Auto-reconnect
+      // in place when enabled; otherwise show the manual reconnect overlay.
+      if (autoReconnectRef.current) {
+        terminal.write('\r\n\x1b[33m[Connection lost — reconnecting…]\x1b[0m\r\n')
+        onAutoReconnectRef.current()
+        return
+      }
       terminal.write('\r\n\x1b[33m[Session closed]\x1b[0m\r\n')
       setIsDisconnected(true)
       updateTab(tab.id, { status: 'disconnected' })
@@ -246,31 +265,60 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
       container.removeEventListener('mouseup', onMouseUp)
       webglRef.current?.dispose()
       webglRef.current = null
+      canvasRef.current?.dispose()
+      canvasRef.current = null
       terminal.dispose()
       terminalRef.current = null
     }
   }, [tab.sessionId])
 
-  // Attach WebGL only while active/visible; dispose it when this pane goes to the
-  // background so we never hold more than a couple of GPU contexts at once.
+  // Attach a GPU/2D renderer only while active/visible; dispose it when this pane
+  // goes to the background so we never hold more than a couple of GPU contexts at
+  // once. Tier order: WebGL (fastest) → Canvas (fast 2D, no GPU context) → DOM
+  // (xterm's built-in fallback). On machines where WebGL is blacklisted/missing
+  // (VMs, RDP, old GPUs) the Canvas tier keeps typing snappy instead of dropping
+  // straight to the slow DOM renderer.
   useEffect(() => {
     const term = terminalRef.current
     if (!term) return
+
+    const disposeRenderers = (): void => {
+      webglRef.current?.dispose(); webglRef.current = null
+      canvasRef.current?.dispose(); canvasRef.current = null
+    }
+
     if (isActive && isPageVisible) {
-      if (!webglRef.current) {
+      if (webglRef.current || canvasRef.current) return  // already attached
+      try {
+        const w = new WebglAddon()
+        // On context loss, drop WebGL and fall back to Canvas for this pane.
+        w.onContextLoss(() => {
+          w.dispose()
+          if (webglRef.current === w) webglRef.current = null
+          if (isActive && isPageVisible && !canvasRef.current) {
+            try {
+              const c = new CanvasAddon()
+              term.loadAddon(c)
+              canvasRef.current = c
+            } catch { /* DOM renderer stays active */ }
+          }
+        })
+        term.loadAddon(w)
+        webglRef.current = w
+        term.refresh(0, term.rows - 1)
+      } catch {
+        // WebGL unavailable — try the Canvas 2D renderer before giving up to DOM.
         try {
-          const w = new WebglAddon()
-          w.onContextLoss(() => { w.dispose(); if (webglRef.current === w) webglRef.current = null })
-          term.loadAddon(w)
-          webglRef.current = w
+          const c = new CanvasAddon()
+          term.loadAddon(c)
+          canvasRef.current = c
           term.refresh(0, term.rows - 1)
         } catch {
-          /* WebGL unavailable — DOM renderer stays active */
+          /* Both unavailable — DOM renderer stays active */
         }
       }
-    } else if (webglRef.current) {
-      webglRef.current.dispose()
-      webglRef.current = null
+    } else {
+      disposeRenderers()
     }
   }, [isActive, isPageVisible, tab.sessionId])
 
@@ -565,6 +613,7 @@ function TerminalPane({ tab, isActive, isPageVisible, onReconnect, onClose }: Te
 export default memo(TerminalPane, (a, b) =>
   a.isActive === b.isActive &&
   a.isPageVisible === b.isPageVisible &&
+  a.autoReconnect === b.autoReconnect &&
   a.tab.id === b.tab.id &&
   a.tab.sessionId === b.tab.sessionId &&
   a.tab.status === b.tab.status &&

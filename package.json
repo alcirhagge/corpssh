@@ -1,6 +1,6 @@
 {
   "name": "ssh-corporate-client",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "description": "Corporate SSH client with dark/light themes, multi-tab terminal, SFTP and session logging",
   "author": "alcirhagge",
   "license": "MIT",
@@ -100,8 +100,11 @@
     "zustand": "^4.5.0"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@novnc/novnc": "^1.4.0",
     "@supabase/supabase-js": "^2.108.1",
+    "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/headless": "^5.5.0",
     "electron-updater": "^6.8.3",

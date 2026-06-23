@@ -1,9 +1,11 @@
 import { Client, ConnectConfig, SFTPWrapper } from 'ssh2'
 import { BrowserWindow } from 'electron'
+import * as net from 'net'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { appendSessionData, appendSessionCommand, resizeSession } from './sessionLogger'
+import { verifyHostKey } from './knownHosts'
 
 export interface SSHConnectionConfig {
   id: string
@@ -15,6 +17,18 @@ export interface SSHConnectionConfig {
   privateKeyPath?: string
   privateKeyContent?: string
   passphrase?: string
+  /** TOFU host-key check. Default true; false accepts any key (legacy behavior). */
+  strictHostKey?: boolean
+}
+
+// Thrown when a host presents a different key than the one we pinned (possible
+// MITM). The renderer surfaces this distinctly so the user can re-trust on
+// purpose instead of it looking like a generic connection failure.
+export class HostKeyChangedError extends Error {
+  constructor(public host: string, public port: number, public oldFp: string, public newFp: string) {
+    super(`HOST KEY CHANGED for ${host}:${port}. Pinned ${oldFp} but server offered ${newFp}. Possible man-in-the-middle — or the server was legitimately rebuilt.`)
+    this.name = 'HostKeyChangedError'
+  }
 }
 
 export interface SFTPEntry {
@@ -35,6 +49,19 @@ interface ActiveConnection {
 }
 
 const activeConnections = new Map<string, ActiveConnection>()
+
+// Sessions the user is closing on purpose. The renderer auto-reconnects on any
+// ssh:closed event, so for an intentional disconnect we suppress that event
+// exactly once instead of bouncing the session back up.
+const intentionalClose = new Set<string>()
+
+// Emit ssh:closed unless this was a deliberate disconnect. A single teardown
+// fires BOTH the stream 'close' and the client 'close', so we suppress on
+// membership (no delete here) and let disconnectSSH GC the entry on a timer.
+function emitClosed(sessionId: string): void {
+  if (intentionalClose.has(sessionId)) return
+  getWindow()?.webContents.send(`ssh:closed:${sessionId}`)
+}
 
 function getWindow(): BrowserWindow | null {
   const wins = BrowserWindow.getAllWindows()
@@ -57,6 +84,19 @@ function dbg(line: string): void {
   }
 }
 
+// Build the TCP socket ourselves so we can disable Nagle's algorithm
+// (TCP_NODELAY). ssh2 leaves Nagle ON by default, which — combined with the
+// remote's delayed-ACK — coalesces single keystrokes and adds 40-200ms of
+// per-character latency on any non-zero-RTT link. Native clients (OpenSSH,
+// PuTTY) always set NODELAY for interactive sessions; this matches them so
+// typing echoes instantly. `keepAlive` also trims dead-peer detection.
+function makeNoDelaySocket(host: string, port: number): net.Socket {
+  const sock = net.connect({ host, port })
+  sock.setNoDelay(true)
+  sock.setKeepAlive(true, 30000)
+  return sock
+}
+
 export function createSSHConnection(
   sessionId: string,
   config: SSHConnectionConfig,
@@ -65,12 +105,41 @@ export function createSSHConnection(
   return new Promise((resolve, reject) => {
     const client = new Client()
 
+    // Pre-connected NODELAY socket (see makeNoDelaySocket). A socket-level error
+    // before the SSH handshake completes (ECONNREFUSED / unreachable) must still
+    // reject this promise, so forward it until ssh2 takes over on 'ready'.
+    const sock = makeNoDelaySocket(config.host, config.port)
+    let handshakeDone = false
+    sock.once('error', (err) => {
+      if (!handshakeDone) {
+        activeConnections.delete(sessionId)
+        reject(err)
+      }
+    })
+
+    // Host-key TOFU verification (skipped when strictHostKey === false).
+    // ssh2 calls hostVerifier with the raw key during the handshake; returning
+    // false aborts. On a key MISMATCH we stash a typed error so the catch path
+    // surfaces it as HostKeyChangedError rather than a vague handshake failure.
+    let hostKeyError: HostKeyChangedError | null = null
+    const hostVerifier = (keyBuf: Buffer): boolean => {
+      const verdict = verifyHostKey(config.host, config.port, keyBuf)
+      if (verdict.status === 'changed') {
+        hostKeyError = new HostKeyChangedError(config.host, config.port, verdict.oldFp, verdict.newFp)
+        return false
+      }
+      return true
+    }
+
     const connectConfig: ConnectConfig = {
-      host: config.host,
-      port: config.port,
+      sock,
       username: config.username,
       readyTimeout: 15000,
       keepaliveInterval: 30000,
+      // ~6 missed keepalives (3 min) before declaring the peer dead, instead of
+      // the default 3 (~90s) — survives brief Wi-Fi/VPN blips without dropping.
+      keepaliveCountMax: 6,
+      ...(config.strictHostKey === false ? {} : { hostVerifier }),
       tryKeyboard: true,
       algorithms: {
         kex: [
@@ -163,6 +232,7 @@ export function createSSHConnection(
     })
 
     client.on('ready', () => {
+      handshakeDone = true
       activeConnections.set(sessionId, { client, sessionId, config, remoteIdent })
       resolve()
     })
@@ -170,13 +240,14 @@ export function createSSHConnection(
     client.on('error', (err: any) => {
       dbg(`[${config.host}] ERROR code=${err?.code ?? '?'} level=${err?.level ?? '?'} msg=${err?.message ?? err}`)
       activeConnections.delete(sessionId)
-      reject(err)
+      // A rejected host key surfaces here as a generic handshake error — replace
+      // it with the typed, actionable error so the UI can offer "re-trust".
+      reject(hostKeyError ?? err)
     })
 
     client.on('close', () => {
       activeConnections.delete(sessionId)
-      const win = getWindow()
-      win?.webContents.send(`ssh:closed:${sessionId}`)
+      emitClosed(sessionId)
       onNaturalClose?.()
     })
 
@@ -221,7 +292,7 @@ export function createShellSession(sessionId: string, cols: number, rows: number
         stream.on('close', () => {
           if (outTimer) { clearTimeout(outTimer); flushOut() }
           cmdBuffers.delete(sessionId)
-          getWindow()?.webContents.send(`ssh:closed:${sessionId}`)
+          emitClosed(sessionId)
           activeConnections.delete(sessionId)
         })
 
@@ -263,6 +334,8 @@ export function resizeTerminal(sessionId: string, cols: number, rows: number): v
 }
 
 export function disconnectSSH(sessionId: string): void {
+  // Mark intentional so the resulting close events don't trigger auto-reconnect.
+  intentionalClose.add(sessionId)
   const conn = activeConnections.get(sessionId)
   if (conn) {
     const s = conn as any
@@ -271,6 +344,8 @@ export function disconnectSSH(sessionId: string): void {
     activeConnections.delete(sessionId)
   }
   cmdBuffers.delete(sessionId)
+  // GC the suppression flag after both close events have fired.
+  setTimeout(() => intentionalClose.delete(sessionId), 3000)
 }
 
 export function listSFTPDirectory(sessionId: string, remotePath: string): Promise<SFTPEntry[]> {
@@ -702,9 +777,15 @@ export function detectRemoteOs(config: SSHConnectionConfig): Promise<string> {
 
     const masterTid = setTimeout(() => done('unknown'), 25000)
 
+    // Same NODELAY socket as the live connection so the probe handshake isn't
+    // throttled by Nagle either. The OS probe is host-key agnostic (read-only,
+    // throwaway) so it deliberately does NOT pin — strict checks belong to the
+    // real session via createSSHConnection.
+    const probeSock = makeNoDelaySocket(config.host, config.port)
+    probeSock.once('error', () => done('unknown'))
+
     const connectConfig: ConnectConfig = {
-      host: config.host,
-      port: config.port,
+      sock: probeSock,
       username: config.username,
       readyTimeout: 8000,
       tryKeyboard: true,

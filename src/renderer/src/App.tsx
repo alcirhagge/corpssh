@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { useAppStore } from './store/appStore'
 import TitleBar from './components/Layout/TitleBar'
 import Sidebar from './components/Layout/Sidebar'
@@ -23,7 +23,7 @@ export default function App() {
     setServers, setGroups, setKeys, setCredentials, setSnippets, setSettings,
     addTab, updateTab, removeTab, setActiveTab, setActivePage,
     upsertServer, theme, setTheme, addLog, setCloudRecovery,
-    servers, tabs, activeTabId, activePage, rightPanel
+    servers, tabs, activeTabId, activePage, rightPanel, settings
   } = useAppStore()
 
   // Load data + apply theme
@@ -143,6 +143,45 @@ export default function App() {
 
   const handleConnectSftp = (server: Server) => openSSHTab(server, 'sftp')
 
+  // Auto-reconnect a session that dropped unexpectedly (Wi-Fi/VPN blip, server
+  // reboot). Reconnects IN PLACE — keeps the same tab/scrollback identity and
+  // just swaps in a fresh sessionId — with capped, backed-off retries. State is
+  // read from the store (not stale closures) so it stays correct across retries.
+  const RECONNECT_MAX = 4
+  const reconnectAttempts = useRef<Record<string, number>>({})
+  const reconnectInPlace = useCallback((tabId: string) => {
+    const state = useAppStore.getState()
+    const tab = state.tabs.find((t) => t.id === tabId)
+    if (!tab) return
+    const server = state.servers.find((s) => s.id === tab.serverId)
+    if (!server) return
+
+    const n = (reconnectAttempts.current[tabId] ?? 0) + 1
+    reconnectAttempts.current[tabId] = n
+    state.updateTab(tabId, { status: 'connecting' })
+
+    window.api.ssh
+      .connect({
+        id: server.id, name: server.name, host: server.host, port: server.port,
+        username: server.username, authMethod: server.authMethod,
+        password: server.password, privateKeyPath: server.privateKeyPath,
+        privateKeyContent: server.privateKeyContent, passphrase: server.passphrase,
+        credentialId: server.credentialId
+      })
+      .then((sessionId: string) => {
+        reconnectAttempts.current[tabId] = 0
+        useAppStore.getState().updateTab(tabId, { sessionId, status: 'connected', connectedAt: Date.now() })
+      })
+      .catch(() => {
+        if (n >= RECONNECT_MAX) {
+          useAppStore.getState().updateTab(tabId, { status: 'disconnected' })
+          return
+        }
+        // Exponential-ish backoff: 1s, 2s, 4s…
+        setTimeout(() => reconnectInPlace(tabId), 1000 * 2 ** (n - 1))
+      })
+  }, [])
+
   const handleNewTab = (tab: Tab) => {
     const server = servers.find((s) => s.id === tab.serverId)
     if (server) handleConnectServer(server)
@@ -256,6 +295,7 @@ export default function App() {
                     {tab.status === 'error' && (
                       <ErrorScreen
                         name={tab.serverName}
+                        host={tab.serverHost}
                         error={tab.errorMessage ?? 'Unknown error'}
                         onRetry={() => {
                           const server = servers.find((s) => s.id === tab.serverId)
@@ -272,6 +312,8 @@ export default function App() {
                             tab={tab}
                             isActive={visible && !(tab.mode === 'sftp' && tab.status === 'connected')}
                             isPageVisible={inTerminalArea && tabKind(tab) === pageKind}
+                            autoReconnect={settings.autoReconnect !== false}
+                            onAutoReconnect={() => reconnectInPlace(tab.id)}
                             onReconnect={() => {
                               const server = servers.find((s) => s.id === tab.serverId)
                               if (server) { removeTab(tab.id); handleConnectServer(server) }
@@ -337,6 +379,8 @@ function LoadingScreen({ name, host }: { name: string; host: string }) {
 
 function friendlyError(raw: string): { title: string; detail: string } {
   const r = raw.toLowerCase()
+  if (r.includes('host key changed'))
+    return { title: 'The server identity changed', detail: 'The host presented a different key than the one trusted before. This can mean the server was rebuilt — or that traffic is being intercepted (MITM).' }
   if (r.includes('all configured authentication methods failed') || r.includes('auth fail'))
     return { title: 'Invalid credentials', detail: 'Check your username and password and try again.' }
   if (r.includes('no matching key exchange'))
@@ -362,22 +406,45 @@ function friendlyError(raw: string): { title: string; detail: string } {
   return { title: 'Connection failed', detail: clean }
 }
 
-function ErrorScreen({ name, error, onRetry, onClose }: {
-  name: string; error: string; onRetry: () => void; onClose: () => void
+function ErrorScreen({ name, host, error, onRetry, onClose }: {
+  name: string; host: string; error: string; onRetry: () => void; onClose: () => void
 }) {
   const { title, detail } = friendlyError(error)
+  // Host-key mismatch is a security event, not a plain failure: surface it
+  // distinctly and gate re-connection behind an explicit "trust new key".
+  const isHostKeyChanged = /HOST KEY CHANGED/i.test(error)
+
+  const trustAndRetry = () => {
+    const [h, p] = host.split(':')
+    window.api.ssh.forgetHostKey(h, Number(p) || 22).finally(onRetry)
+  }
+
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4" style={{ background: 'var(--bg-app)' }}>
       <div className="w-12 h-12 rounded-full flex items-center justify-center text-2xl"
-        style={{ background: 'var(--error-subtle)' }}>✕</div>
-      <div className="text-center" style={{ maxWidth: 320 }}>
-        <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Failed to connect to {name}</p>
-        <p className="font-semibold mt-2" style={{ color: 'var(--error)', fontSize: 14 }}>{title}</p>
+        style={{ background: isHostKeyChanged ? 'var(--warning-subtle)' : 'var(--error-subtle)' }}>
+        {isHostKeyChanged ? '⚠' : '✕'}
+      </div>
+      <div className="text-center" style={{ maxWidth: 360 }}>
+        <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+          {isHostKeyChanged ? 'Host key verification failed' : `Failed to connect to ${name}`}
+        </p>
+        <p className="font-semibold mt-2" style={{ color: isHostKeyChanged ? 'var(--warning)' : 'var(--error)', fontSize: 14 }}>{title}</p>
         <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{detail}</p>
+        {isHostKeyChanged && (
+          <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+            Only trust the new key if you know this server was rebuilt or rekeyed.
+          </p>
+        )}
       </div>
       <div className="flex gap-2">
-        <button onClick={onRetry} className="px-4 py-1.5 rounded-lg text-xs font-medium"
-          style={{ background: 'var(--accent)', color: '#fff' }}>Try again</button>
+        {isHostKeyChanged ? (
+          <button onClick={trustAndRetry} className="px-4 py-1.5 rounded-lg text-xs font-medium"
+            style={{ background: 'var(--warning)', color: '#1a1300' }}>Trust new key & reconnect</button>
+        ) : (
+          <button onClick={onRetry} className="px-4 py-1.5 rounded-lg text-xs font-medium"
+            style={{ background: 'var(--accent)', color: '#fff' }}>Try again</button>
+        )}
         <button onClick={onClose} className="px-4 py-1.5 rounded-lg text-xs"
           style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
           Close

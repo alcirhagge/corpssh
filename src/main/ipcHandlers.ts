@@ -32,6 +32,7 @@ import {
   detectRemoteOs,
   detectOsFromSession
 } from './sshManager'
+import { forgetHostKey, trustHostKey } from './knownHosts'
 import {
   getServers,
   saveServer,
@@ -355,6 +356,10 @@ export function setupIpcHandlers(): void {
     const auth = config.id ? resolveServerAuth(config.id) : null
     if (auth) config = { ...config, ...auth }
 
+    // Global TOFU host-key policy (default on) applied here so the renderer
+    // never has to thread it through every connect call.
+    config = { ...config, strictHostKey: getSettings().strictHostKey !== false }
+
     const sessionId = generateId()
     const connectedAt = Date.now()
     const serverName = config.name ?? config.host
@@ -409,6 +414,17 @@ export function setupIpcHandlers(): void {
     win?.webContents.send('log:new', entry)
     sendRemoteLog(entry)
     return sessionId
+  })
+
+  // Re-trust a host after a legitimate key change: forget the pinned key so the
+  // next connect re-pins the new one. host/port identify the entry.
+  ipcMain.handle('ssh:forgetHostKey', (_e, host: string, port: number) => {
+    forgetHostKey(host, port)
+    return true
+  })
+  ipcMain.handle('ssh:trustHostKey', (_e, host: string, port: number, fp: string) => {
+    trustHostKey(host, port, fp)
+    return true
   })
 
   ipcMain.handle('ssh:detectOs', async (_e, config) => {

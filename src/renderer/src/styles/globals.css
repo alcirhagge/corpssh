@@ -1,4 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Fonts are self-hosted via @fontsource (imported in main.tsx) — no external
+   Google Fonts request, so first paint isn't network-blocked and the app works
+   fully offline. */
 
 @tailwind base;
 @tailwind components;

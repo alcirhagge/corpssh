@@ -124,6 +124,10 @@ export interface AppSettings {
   cursorBlink: boolean
   scrollback: number
   bellStyle: 'none' | 'sound' | 'visual'
+  /** TOFU host-key verification. Default true. */
+  strictHostKey?: boolean
+  /** Auto-reconnect a session dropped unexpectedly. Default true. */
+  autoReconnect?: boolean
 }
 
 const defaultSettings: AppSettings = {
@@ -133,7 +137,9 @@ const defaultSettings: AppSettings = {
   cursorStyle: 'block',
   cursorBlink: true,
   scrollback: 5000,
-  bellStyle: 'none'
+  bellStyle: 'none',
+  strictHostKey: true,
+  autoReconnect: true
 }
 
 function ensureStore(): StoreData {
