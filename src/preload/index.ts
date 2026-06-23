@@ -75,6 +75,9 @@ const api = {
     forgetHostKey: (host: string, port: number) => ipcRenderer.invoke('ssh:forgetHostKey', host, port),
     trustHostKey: (host: string, port: number, fp: string) => ipcRenderer.invoke('ssh:trustHostKey', host, port, fp),
     listKnownHosts: (): Promise<{ host: string; port: number; fp: string }[]> => ipcRenderer.invoke('ssh:listKnownHosts'),
+    historyList: (query?: string, limit?: number): Promise<{ cmd: string; ts: number; count: number }[]> =>
+      ipcRenderer.invoke('history:list', query, limit),
+    historyClear: () => ipcRenderer.invoke('history:clear'),
     onData: (sessionId: string, cb: (data: string) => void) => {
       const channel = `ssh:data:${sessionId}`
       ipcRenderer.on(channel, (_e, data) => cb(data))

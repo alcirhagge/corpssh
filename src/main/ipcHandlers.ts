@@ -34,6 +34,7 @@ import {
   onSessionClosed
 } from './sshManager'
 import { forgetHostKey, trustHostKey, listKnownHosts } from './knownHosts'
+import { listCommands, clearCommandHistory } from './commandHistory'
 import { startTunnel, stopTunnel, listTunnels, type TunnelConfig } from './portForward'
 import {
   getServers,
@@ -453,6 +454,10 @@ export function setupIpcHandlers(): void {
     return true
   })
   ipcMain.handle('ssh:listKnownHosts', () => listKnownHosts())
+
+  // --- Command history (Ctrl+R reverse search) ---
+  ipcMain.handle('history:list', (_e, query?: string, limit?: number) => listCommands(query ?? '', limit ?? 200))
+  ipcMain.handle('history:clear', () => { clearCommandHistory(); return true })
 
   // ─── Port forwarding (tunnels) ──────────────────────────────────────────────
   ipcMain.handle('forward:start', async (_e, sessionId: string, cfg: TunnelConfig) => {

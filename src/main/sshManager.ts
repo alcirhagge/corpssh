@@ -6,6 +6,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { appendSessionData, appendSessionCommand, resizeSession } from './sessionLogger'
 import { verifyHostKey } from './knownHosts'
+import { recordCommand } from './commandHistory'
 
 export interface SSHConnectionConfig {
   id: string
@@ -410,7 +411,7 @@ export function sendInput(sessionId: string, data: string): void {
   for (const ch of data) {
     if (ch === '\r' || ch === '\n') {
       const cmd = buf.trim()
-      if (cmd) appendSessionCommand(sessionId, cmd)
+      if (cmd) { appendSessionCommand(sessionId, cmd); recordCommand(cmd) }
       buf = ''
     } else if (ch === '\x7f') {
       buf = buf.slice(0, -1)

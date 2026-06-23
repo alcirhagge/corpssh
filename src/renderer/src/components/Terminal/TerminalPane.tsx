@@ -58,6 +58,7 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
   const activeRowRef = useRef<HTMLButtonElement>(null)
   const [isDisconnected, setIsDisconnected] = useState(false)
   const [copyNotice, setCopyNotice] = useState<{ chars: number; key: number } | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
 
   // Refs so the long-lived onClosed handler (bound once per sessionId) always
   // reads the CURRENT auto-reconnect settings instead of mount-time values.
@@ -157,6 +158,14 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
         setShowSearch((v) => !v)
+        return false
+      }
+      // Ctrl/Cmd+R → reverse-search the persistent command history (xterm would
+      // otherwise send ^R, bash's own reverse-i-search). Our palette inserts the
+      // chosen command into the prompt for review instead of auto-running it.
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+        e.preventDefault()
+        setShowHistory(true)
         return false
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c' && terminal.hasSelection()) {
@@ -524,6 +533,17 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
           copied {copyNotice.chars} {copyNotice.chars === 1 ? 'char' : 'chars'} to clipboard
         </div>
       )}
+      {showHistory && (
+        <HistoryPalette
+          onClose={() => { setShowHistory(false); terminalRef.current?.focus() }}
+          onPick={(cmd) => {
+            const sid = sessionIdRef.current
+            if (sid) window.api.ssh.input(sid, cmd)
+            setShowHistory(false)
+            terminalRef.current?.focus()
+          }}
+        />
+      )}
       {showSearch && (
         <div
           className="absolute top-0 right-0 bottom-0 z-10 flex flex-col cs-glass-strong animate-slide-right"
@@ -644,6 +664,104 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
         }}
         tabIndex={0}
       />
+    </div>
+  )
+}
+
+// ─── Ctrl+R command-history reverse search ───────────────────────────────────
+// A centered palette over the terminal. Type to filter the persistent history
+// (newest first); ↑/↓ move, Enter inserts the command into the prompt for review
+// (it is NOT auto-run), Esc closes.
+interface HistEntry { cmd: string; ts: number; count: number }
+
+function HistoryPalette({ onClose, onPick }: { onClose: () => void; onPick: (cmd: string) => void }) {
+  const [query, setQuery] = useState('')
+  const [items, setItems] = useState<HistEntry[]>([])
+  const [idx, setIdx] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const activeRowRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  // Debounced fetch from the main-process store as the query changes.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      window.api.ssh.historyList(query, 200)
+        .then((list) => { setItems(list); setIdx(0) })
+        .catch(() => setItems([]))
+    }, 80)
+    return () => clearTimeout(t)
+  }, [query])
+
+  useEffect(() => { activeRowRef.current?.scrollIntoView({ block: 'nearest' }) }, [idx])
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') { e.preventDefault(); onClose() }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setIdx((i) => Math.min(i + 1, items.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setIdx((i) => Math.max(i - 1, 0)) }
+    else if (e.key === 'Enter') { e.preventDefault(); const it = items[idx]; if (it) onPick(it.cmd) }
+  }
+
+  return (
+    <div
+      className="absolute inset-0 z-30 flex items-start justify-center"
+      style={{ background: 'rgba(0,0,0,0.45)', paddingTop: '12vh' }}
+      onClick={onClose}
+    >
+      <div
+        className="flex flex-col rounded-xl overflow-hidden cs-glass-strong animate-fade-in"
+        style={{ width: 'min(620px, 90%)', maxHeight: '64vh', background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 px-3 py-2.5" style={{ borderBottom: '1px solid var(--border)' }}>
+          <Search size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Search command history…"
+            className="text-xs flex-1 min-w-0"
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', padding: 0 }}
+          />
+          <span className="text-xs tabular-nums" style={{ color: 'var(--text-muted)' }}>
+            {items.length}
+          </span>
+        </div>
+        <div className="flex-1 overflow-y-auto py-1">
+          {items.length === 0 ? (
+            <div className="px-3 py-6 text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+              {query ? 'No matching commands' : 'No command history yet'}
+            </div>
+          ) : (
+            items.map((it, i) => (
+              <button
+                key={`${it.cmd}-${i}`}
+                ref={i === idx ? activeRowRef : undefined}
+                onClick={() => onPick(it.cmd)}
+                onMouseEnter={() => setIdx(i)}
+                className="w-full text-left flex items-center gap-2 px-3 py-1.5"
+                style={{
+                  background: i === idx ? 'var(--bg-active, rgba(76,116,255,0.16))' : 'transparent',
+                  borderLeft: `2px solid ${i === idx ? 'var(--accent)' : 'transparent'}`
+                }}
+              >
+                <span className="flex-1 truncate font-mono text-xs" style={{ color: 'var(--text-primary)' }}>
+                  {it.cmd}
+                </span>
+                {it.count > 1 && (
+                  <span className="text-xs tabular-nums flex-shrink-0" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+                    ×{it.count}
+                  </span>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+        <div className="px-3 py-1.5 text-xs flex items-center gap-3" style={{ borderTop: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: 10 }}>
+          <span>↑↓ navigate</span><span>↵ insert</span><span>esc close</span>
+        </div>
+      </div>
     </div>
   )
 }
