@@ -13,6 +13,7 @@ import ExportPanel from './components/Export/ExportPanel'
 import CredentialsPanel from './components/Vault/CredentialsPanel'
 import CloudPanel from './components/Cloud/CloudPanel'
 import SnippetsPanel from './components/Snippets/SnippetsPanel'
+import TunnelsPanel from './components/Tunnels/TunnelsPanel'
 import SettingsPanel from './components/Dialogs/SettingsPanel'
 import UpdateNotification from './components/Layout/UpdateNotification'
 import type { Server, Tab, LogEntry } from './types'
@@ -227,6 +228,7 @@ export default function App() {
   const showVault = activePage === 'vault'
   const showCloud = activePage === 'cloud'
   const showSnippets = activePage === 'snippets'
+  const showTunnels = activePage === 'tunnels'
   const showSettings = activePage === 'keys'
 
   // Normal vs script (snippet-broadcast) sessions live in separate strips
@@ -353,6 +355,7 @@ export default function App() {
             {showVault && <CredentialsPanel />}
             {showCloud && <CloudPanel />}
             {showSnippets && <SnippetsPanel onBroadcast={handleBroadcastSnippet} />}
+            {showTunnels && <TunnelsPanel />}
             {showSettings && <SettingsPanel onClose={() => setActivePage('hosts')} />}
           </div>
         </div>

@@ -90,6 +90,17 @@ const api = {
     }
   },
 
+  // Port forwarding (tunnels)
+  forward: {
+    start: (sessionId: string, cfg: unknown) => ipcRenderer.invoke('forward:start', sessionId, cfg),
+    stop: (id: string) => ipcRenderer.invoke('forward:stop', id),
+    list: () => ipcRenderer.invoke('forward:list'),
+    onStatus: (cb: (tunnels: unknown[]) => void) => {
+      ipcRenderer.on('forward:status', (_e, data) => cb(data))
+      return () => ipcRenderer.removeAllListeners('forward:status')
+    }
+  },
+
   // SFTP
   sftp: {
     list: (sessionId: string, path: string) => ipcRenderer.invoke('sftp:list', sessionId, path),

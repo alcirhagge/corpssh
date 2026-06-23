@@ -59,6 +59,24 @@ export interface Snippet {
   description?: string
 }
 
+export type TunnelType = 'local' | 'remote' | 'dynamic'
+
+export interface Tunnel {
+  id: string
+  type: TunnelType
+  bindAddr?: string
+  bindPort: number
+  destHost?: string
+  destPort?: number
+}
+
+export interface TunnelStatus extends Tunnel {
+  sessionId: string
+  status: 'open' | 'error'
+  error?: string
+  connections: number
+}
+
 export interface AppSettings {
   theme: 'dark' | 'light' | 'system'
   themeId: string
@@ -129,7 +147,7 @@ export interface RemoteLogConfig {
 }
 
 export type Theme = 'dark' | 'light'
-export type NavPage = 'hosts' | 'keys' | 'logs' | 'export' | 'terminal' | 'vault' | 'cloud' | 'snippets' | 'scripts'
+export type NavPage = 'hosts' | 'keys' | 'logs' | 'export' | 'terminal' | 'vault' | 'cloud' | 'snippets' | 'scripts' | 'tunnels'
 
 export const SERVER_COLORS = [
   '#4c74ff', '#30d48a', '#f7b731', '#ff5757',

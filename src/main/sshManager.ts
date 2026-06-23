@@ -50,6 +50,26 @@ interface ActiveConnection {
 
 const activeConnections = new Map<string, ActiveConnection>()
 
+// Listeners notified when a session's underlying SSH client goes away (natural
+// close OR intentional disconnect). Port forwarding subscribes here to tear down
+// the session's tunnels — done via a listener list instead of a direct import so
+// portForward.ts can depend on sshManager without a circular dependency.
+const sessionClosedListeners: Array<(sessionId: string) => void> = []
+export function onSessionClosed(cb: (sessionId: string) => void): void {
+  sessionClosedListeners.push(cb)
+}
+function notifySessionClosed(sessionId: string): void {
+  for (const cb of sessionClosedListeners) {
+    try { cb(sessionId) } catch { /* a bad listener must not break teardown */ }
+  }
+}
+
+// Expose the live ssh2 Client for a session so feature modules (port forwarding)
+// can open their own channels on the same authenticated connection.
+export function getClient(sessionId: string): Client | null {
+  return activeConnections.get(sessionId)?.client ?? null
+}
+
 // Sessions the user is closing on purpose. The renderer auto-reconnects on any
 // ssh:closed event, so for an intentional disconnect we suppress that event
 // exactly once instead of bouncing the session back up.
@@ -247,6 +267,7 @@ export function createSSHConnection(
 
     client.on('close', () => {
       activeConnections.delete(sessionId)
+      notifySessionClosed(sessionId)
       emitClosed(sessionId)
       onNaturalClose?.()
     })
@@ -343,6 +364,7 @@ export function disconnectSSH(sessionId: string): void {
     conn.client.end()
     activeConnections.delete(sessionId)
   }
+  notifySessionClosed(sessionId)
   cmdBuffers.delete(sessionId)
   // GC the suppression flag after both close events have fired.
   setTimeout(() => intentionalClose.delete(sessionId), 3000)
