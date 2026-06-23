@@ -195,7 +195,20 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
     // process (see sshManager.sendInput / createShellSession), so the renderer
     // no longer round-trips every keystroke and every output chunk back to main.
     terminal.onData(data => {
-      window.api.ssh.input(tab.sessionId!, data)
+      // Live broadcast: when enabled, the focused terminal mirrors every keystroke
+      // to all connected terminal sessions in the SAME strip (normal vs script).
+      // Only the focused pane fires onData, so no per-pane active guard is needed.
+      // State is read fresh via getState() to dodge a stale mount-time closure.
+      const st = useAppStore.getState()
+      if (st.broadcastInput) {
+        const myKind = tab.kind ?? 'normal'
+        const targets = st.tabs.filter(
+          (t) => t.sessionId && t.status === 'connected' && t.mode === 'terminal' && (t.kind ?? 'normal') === myKind
+        )
+        for (const t of targets) window.api.ssh.input(t.sessionId!, data)
+      } else {
+        window.api.ssh.input(tab.sessionId!, data)
+      }
     })
 
     // SSH data → terminal

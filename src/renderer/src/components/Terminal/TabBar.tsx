@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Terminal, FolderOpen, Plus, Search, X, Code2, CornerDownLeft, CheckCircle2, Circle, CheckSquare, Square } from 'lucide-react'
+import { Terminal, FolderOpen, Plus, Search, X, Code2, CornerDownLeft, CheckCircle2, Circle, CheckSquare, Square, Radio } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Tab, Server, Snippet } from '../../types'
 import { HOST_ICON_COLORS } from '../../types'
@@ -16,8 +16,10 @@ interface TabBarProps {
 interface CtxMenu { tabId: string; x: number; y: number }
 
 export default function TabBar({ kind, onCloseTab, onNewTab, onToggleSftp, onConnectServer, onBroadcastSnippet }: TabBarProps) {
-  const { tabs, activeTabId, setActiveTab, focusTerminal } = useAppStore()
+  const { tabs, activeTabId, setActiveTab, focusTerminal, broadcastInput, setBroadcastInput } = useAppStore()
   const kindTabs = tabs.filter((t) => (t.kind ?? 'normal') === kind)
+  // Live broadcast only makes sense with 2+ connected terminals in this strip.
+  const liveCount = kindTabs.filter((t) => t.status === 'connected' && t.mode === 'terminal').length
   const activeTab = kindTabs.find((t) => t.id === activeTabId)
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null)
   const [showPicker, setShowPicker] = useState(false)
@@ -103,6 +105,27 @@ export default function TabBar({ kind, onCloseTab, onNewTab, onToggleSftp, onCon
         >
           <Code2 size={15} />
         </button>
+
+        {/* Live broadcast toggle: mirror keystrokes from the focused terminal to
+            every connected terminal in this strip. Only shown when 2+ are live. */}
+        {(liveCount >= 2 || broadcastInput) && (
+          <button
+            onClick={() => setBroadcastInput(!broadcastInput)}
+            title={broadcastInput
+              ? `Broadcast ON — typing goes to all ${liveCount} terminals. Click to stop.`
+              : `Broadcast input to all ${liveCount} connected terminals`}
+            className="flex items-center gap-1 h-full px-2.5 flex-shrink-0 text-xs font-semibold"
+            style={{
+              color: broadcastInput ? '#fff' : 'var(--text-muted)',
+              background: broadcastInput ? 'var(--accent)' : 'transparent'
+            }}
+            onMouseEnter={(e) => { if (!broadcastInput) e.currentTarget.style.color = 'var(--text-secondary)' }}
+            onMouseLeave={(e) => { if (!broadcastInput) e.currentTarget.style.color = 'var(--text-muted)' }}
+          >
+            <Radio size={15} />
+            {broadcastInput && <span>{liveCount}</span>}
+          </button>
+        )}
 
       </div>
 

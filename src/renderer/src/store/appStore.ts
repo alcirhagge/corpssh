@@ -17,6 +17,9 @@ interface AppState {
   isLoading: boolean
   /** bump to ask the active TerminalPane to refocus (e.g. after a snippet insert) */
   terminalFocusNonce: number
+  /** When true, the focused terminal mirrors keystrokes to every connected
+   *  terminal session in the same strip (live multi-host broadcast). */
+  broadcastInput: boolean
   cloudRecovery: { access_token: string; refresh_token: string; type: string | null } | null
 
   setServers: (s: Server[]) => void
@@ -54,6 +57,7 @@ interface AppState {
   setLoading: (v: boolean) => void
   setCloudRecovery: (p: AppState['cloudRecovery']) => void
   focusTerminal: () => void
+  setBroadcastInput: (v: boolean) => void
 }
 
 const defaultSettings: AppSettings = {
@@ -84,6 +88,7 @@ export const useAppStore = create<AppState>((set) => ({
   logs: [],
   isLoading: false,
   terminalFocusNonce: 0,
+  broadcastInput: false,
   cloudRecovery: null,
 
   setServers: (servers) => set({ servers }),
@@ -163,5 +168,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   setLoading: (v) => set({ isLoading: v }),
   setCloudRecovery: (cloudRecovery) => set({ cloudRecovery }),
-  focusTerminal: () => set((s) => ({ terminalFocusNonce: s.terminalFocusNonce + 1 }))
+  focusTerminal: () => set((s) => ({ terminalFocusNonce: s.terminalFocusNonce + 1 })),
+  setBroadcastInput: (broadcastInput) => set({ broadcastInput })
 }))
