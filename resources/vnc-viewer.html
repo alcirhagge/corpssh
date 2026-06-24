@@ -38,7 +38,7 @@
       animation: spin 0.8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .status-text { font-size: 13px; color: #7b80a0; }
+    .status-text { font-size: 13px; color: #7b80a0; white-space: pre-line; text-align: center; max-width: 520px; line-height: 1.5; }
     .status-error { color: #ff5757; }
 
     #screen { flex: 1; position: relative; }
@@ -112,43 +112,78 @@
     const statusText = document.getElementById('status-text')
 
     let rfb = null
+    let connected = false
+
+    // Surface every failure mode on-screen instead of an eternal silent spinner.
+    function showError(msg) {
+      statusEl.style.display = 'flex'
+      const sp = statusEl.querySelector('.spinner')
+      if (sp) sp.style.display = 'none'
+      statusText.textContent = msg
+      statusText.className = 'status-text status-error'
+    }
+    function setStatus(msg) { statusText.textContent = msg }
 
     async function connect() {
+      setStatus('Carregando noVNC…')
+      let RFB
       try {
-        const { default: RFB } = await import(rfbUrl)
-
-        rfb = new RFB(screen, `ws://127.0.0.1:${wsPort}`, {
-          credentials: { password },
-          wsProtocols: ['binary']
-        })
-
-        rfb.scaleViewport = true
-        rfb.resizeSession = false
-        rfb.viewOnly = false
-
-        rfb.addEventListener('connect', () => {
-          statusEl.style.display = 'none'
-        })
-
-        rfb.addEventListener('disconnect', (e) => {
-          statusEl.style.display = 'flex'
-          statusText.textContent = e.detail.clean ? 'Sessão encerrada.' : 'Conexão perdida.'
-          statusText.className = 'status-text status-error'
-        })
-
-        rfb.addEventListener('credentialsrequired', () => {
-          const pw = prompt('Senha VNC:') || ''
-          rfb.sendCredentials({ password: pw })
-        })
-
-        rfb.addEventListener('clipboard', (e) => {
-          navigator.clipboard?.writeText(e.detail.text).catch(() => {})
-        })
-
+        ({ default: RFB } = await import(rfbUrl))
       } catch (err) {
-        statusText.textContent = `Erro: ${err.message}`
-        statusText.className = 'status-text status-error'
+        showError(`Falha ao carregar noVNC: ${err.message}\n(${rfbUrl})`)
+        return
       }
+
+      setStatus(`Conectando ao túnel (porta ${wsPort})…`)
+
+      // If nothing connects within the window, say so — a black screen with a
+      // spinner is indistinguishable from a dead tunnel otherwise.
+      const watchdog = setTimeout(() => {
+        if (!connected) {
+          showError(`Sem resposta do servidor VNC.\nWS local porta ${wsPort}. ` +
+            `Verifique: túnel SSH ativo, wayvnc no destino e ADDRESS/porta corretos.`)
+        }
+      }, 12000)
+
+      try {
+        rfb = new RFB(screen, `ws://127.0.0.1:${wsPort}`, {
+          credentials: { password }
+        })
+      } catch (err) {
+        clearTimeout(watchdog)
+        showError(`Erro RFB: ${err.message}`)
+        return
+      }
+
+      rfb.scaleViewport = true
+      rfb.resizeSession = false
+      rfb.viewOnly = false
+
+      rfb.addEventListener('connect', () => {
+        connected = true
+        clearTimeout(watchdog)
+        statusEl.style.display = 'none'
+      })
+
+      rfb.addEventListener('disconnect', (e) => {
+        clearTimeout(watchdog)
+        const reason = e.detail && e.detail.clean ? 'Sessão encerrada.' : 'Conexão perdida (túnel ou servidor caiu).'
+        showError(reason)
+      })
+
+      rfb.addEventListener('securityfailure', (e) => {
+        clearTimeout(watchdog)
+        showError(`Falha de segurança VNC: ${(e.detail && e.detail.reason) || 'desconhecida'}`)
+      })
+
+      rfb.addEventListener('credentialsrequired', () => {
+        const pw = prompt('Senha VNC:') || ''
+        rfb.sendCredentials({ password: pw })
+      })
+
+      rfb.addEventListener('clipboard', (e) => {
+        navigator.clipboard?.writeText(e.detail.text).catch(() => {})
+      })
     }
 
     document.getElementById('btn-keys').addEventListener('click', () => {
