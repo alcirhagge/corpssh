@@ -159,11 +159,16 @@
       rfb.scaleViewport = true
       rfb.resizeSession = false
       rfb.viewOnly = false
+      // Lower latency: shallow Tight compression, mid quality. Harmless for raw.
+      rfb.qualityLevel = 6
+      rfb.compressionLevel = 2
 
       rfb.addEventListener('connect', () => {
         connected = true
         clearTimeout(watchdog)
         statusEl.style.display = 'none'
+        rfb.focus()
+        grabKeyboard()
       })
 
       rfb.addEventListener('disconnect', (e) => {
@@ -187,6 +192,28 @@
       })
     }
 
+    // ── Keyboard capture ──────────────────────────────────────────────────────
+    // The OS eats system keys (Super/Win, Alt+Tab, Alt+Esc) before the page sees
+    // them — that's why pressing Super opened the local Run dialog instead of
+    // reaching Hyprland. The Keyboard Lock API routes those keys to us, but the
+    // browser only hands over the *system* keys while the document is fullscreen.
+    // So: grab on focus (covers most keys) and, in fullscreen, lock everything.
+    let kbLocked = false
+    async function grabKeyboard() {
+      if (!rfb) return
+      rfb.focus()
+      try {
+        if (navigator.keyboard && navigator.keyboard.lock && !kbLocked) {
+          await navigator.keyboard.lock()  // captures Super/Win, Alt+Tab, Esc…
+          kbLocked = true
+        }
+      } catch { /* not fullscreen yet / unsupported — focus still grabs normal keys */ }
+    }
+    function releaseKeyboard() {
+      try { if (kbLocked) { navigator.keyboard.unlock(); kbLocked = false } } catch {}
+      rfb?.blur?.()
+    }
+
     document.getElementById('btn-keys').addEventListener('click', () => {
       rfb?.sendCtrlAltDel()
     })
@@ -195,6 +222,18 @@
       if (document.fullscreenElement) document.exitFullscreen()
       else document.documentElement.requestFullscreen()
     })
+
+    // Fullscreen is what unlocks system-key capture — grab on enter, release on exit.
+    document.addEventListener('fullscreenchange', () => {
+      if (document.fullscreenElement) grabKeyboard()
+      else releaseKeyboard()
+    })
+
+    // Click inside the screen = take control (focus + grab). Leaving the window
+    // (clicking elsewhere / alt-tabbing out) releases, so local shortcuts work again.
+    screen.addEventListener('mousedown', grabKeyboard)
+    window.addEventListener('focus', () => { if (connected) grabKeyboard() })
+    window.addEventListener('blur', releaseKeyboard)
 
     document.getElementById('btn-disconnect').addEventListener('click', () => {
       rfb?.disconnect()
