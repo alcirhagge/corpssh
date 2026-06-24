@@ -98,12 +98,15 @@
     </div>
   </div>
 
-  <script type="module">
+  <!-- noVNC bundled as a classic IIFE (window.NoVNC). Avoids dynamic import()
+       of file:// ES modules, which Chromium/Electron blocks ("Failed to fetch
+       dynamically imported module"). -->
+  <script src="./novnc-bundle.js"></script>
+  <script>
     const params = new URLSearchParams(window.location.search)
     const wsPort   = params.get('port')
     const host     = params.get('host') || 'VNC'
     const password = params.get('password') || ''
-    const rfbUrl   = params.get('rfbUrl')
 
     document.getElementById('host-label').textContent = host
 
@@ -124,13 +127,11 @@
     }
     function setStatus(msg) { statusText.textContent = msg }
 
-    async function connect() {
+    function connect() {
       setStatus('Carregando noVNC…')
-      let RFB
-      try {
-        ({ default: RFB } = await import(rfbUrl))
-      } catch (err) {
-        showError(`Falha ao carregar noVNC: ${err.message}\n(${rfbUrl})`)
+      const RFB = window.NoVNC && window.NoVNC.default
+      if (!RFB) {
+        showError('Falha ao carregar noVNC: bundle não encontrado (novnc-bundle.js).')
         return
       }
 

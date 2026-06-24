@@ -1,6 +1,6 @@
 {
   "name": "ssh-corporate-client",
-  "version": "1.16.2",
+  "version": "1.16.3",
   "description": "Corporate SSH client with dark/light themes, multi-tab terminal, SFTP and session logging",
   "author": "alcirhagge",
   "license": "MIT",
@@ -29,8 +29,8 @@
     "icon": "resources/icon.png",
     "extraResources": [
       {
-        "from": "node_modules/@novnc/novnc/core",
-        "to": "novnc/core"
+        "from": "resources/novnc-bundle.js",
+        "to": "novnc-bundle.js"
       },
       {
         "from": "resources/vnc-viewer.html",
