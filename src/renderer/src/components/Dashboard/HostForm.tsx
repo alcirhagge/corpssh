@@ -449,18 +449,40 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
         {/* VNC section */}
         {form.protocol === 'vnc' && (
           <FormSection label="VNC">
-            <div
-              className="flex flex-col items-center gap-2 py-3 px-2 rounded-lg text-center"
-              style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', opacity: 0.9 }}
+            {/* Tunnel through a saved SSH bastion to reach the VNC server. For a
+                headless box that keeps a reverse tunnel into a VPS, pick the VPS
+                here and set host/port to what the VPS sees (e.g. 127.0.0.1:5900). */}
+            <select
+              value={form.jumpHostId ?? ''}
+              onChange={(e) => set('jumpHostId', e.target.value || undefined)}
+              className="mb-2"
+              title="Túnel SSH até o servidor VNC (acessa wayvnc/x11vnc atrás de NAT/IPv6)"
             >
-              <span style={{ fontSize: 20 }}>🚧</span>
-              <p className="text-xs font-semibold" style={{ color: 'var(--warning)' }}>
-                Feature in development
-              </p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)', fontSize: 10, lineHeight: 1.4 }}>
-                VNC support is still in development and is not available in this version.
-              </p>
+              <option value="">Direct (no SSH tunnel)</option>
+              {servers
+                .filter((s) => (s.protocol ?? 'ssh') === 'ssh' && s.id !== serverIdRef.current)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>↪ via {s.name || s.host}</option>
+                ))}
+            </select>
+
+            <div className="relative mb-1">
+              <input
+                type={showPw ? 'text' : 'password'}
+                value={form.vncPassword ?? ''}
+                onChange={(e) => set('vncPassword', e.target.value)}
+                placeholder="VNC password (optional)"
+                style={{ paddingRight: 32 }}
+              />
+              <button onClick={() => setShowPw((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2"
+                style={{ color: 'var(--text-muted)', background: 'none' }}>
+                {showPw ? <EyeOff size={12} /> : <Eye size={12} />}
+              </button>
             </div>
+            <p className="text-xs px-1" style={{ color: 'var(--text-muted)', fontSize: 10, lineHeight: 1.4 }}>
+              Works with any RFB server (wayvnc on Wayland, x11vnc/TigerVNC on X11). Leave the password blank when auth is handled by the SSH tunnel.
+            </p>
           </FormSection>
         )}
 
@@ -475,16 +497,16 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
       <div className="p-3" style={{ borderTop: '1px solid var(--border)' }}>
         <button
           onClick={handleConnect}
-          disabled={saving || form.protocol === 'vnc'}
+          disabled={saving}
           className="w-full py-2 rounded-lg text-xs font-semibold"
           style={{
-            background: form.protocol === 'vnc' ? 'var(--bg-active)' : 'var(--accent)',
-            color: form.protocol === 'vnc' ? 'var(--text-muted)' : '#fff',
+            background: 'var(--accent)',
+            color: '#fff',
             opacity: saving ? 0.7 : 1,
-            cursor: form.protocol === 'vnc' ? 'not-allowed' : 'pointer'
+            cursor: 'pointer'
           }}
         >
-          {form.protocol === 'vnc' ? 'Unavailable' : 'Connect'}
+          Connect
         </button>
       </div>
     </div>
