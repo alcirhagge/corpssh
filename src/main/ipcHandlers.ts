@@ -201,7 +201,7 @@ export function setupIpcHandlers(): void {
     if (result.canceled || !result.filePath) return null
     const servers = getServers()
     const groups = getGroups()
-    const xml = exportToXML(servers, groups)
+    const xml = exportToXML(servers, groups, getSnippets())
     fs.writeFileSync(result.filePath, xml, 'utf-8')
     return result.filePath
   })
@@ -219,7 +219,7 @@ export function setupIpcHandlers(): void {
       filters: [{ name: 'XML', extensions: ['xml'] }]
     })
     if (result.canceled || !result.filePath) return null
-    const inner = exportToXMLWithCredentials(getServers(), getGroups())
+    const inner = exportToXMLWithCredentials(getServers(), getGroups(), getCredentials(), getSnippets())
     const xml = encryptXMLEnvelope(inner, password)
     fs.writeFileSync(result.filePath, xml, 'utf-8')
     return result.filePath
@@ -232,7 +232,11 @@ export function setupIpcHandlers(): void {
   const applyImport = (xml: string): ImportResult => {
     const data = importFromXML(xml)
     data.groups.forEach(g => { if (!g.id) g.id = generateId(); saveGroup(g) })
+    // Credentials before servers so a server's credentialId resolves to a vault
+    // entry that already exists. Keep their original ids for the link to hold.
+    data.credentials.forEach(c => { if (!c.id) c.id = generateId(); saveCredential(c) })
     data.servers.forEach(s => { if (!s.id) s.id = generateId(); saveServer(s) })
+    data.snippets.forEach(s => { if (!s.id) s.id = generateId(); saveSnippet(s) })
     return data
   }
 

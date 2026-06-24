@@ -3,7 +3,7 @@ import { FileDown, FileUp, CheckCircle, XCircle, RefreshCw, FileCode, ShieldAler
 import { useAppStore } from '../../store/appStore'
 
 export default function ExportPanel() {
-  const { upsertServer, upsertGroup } = useAppStore()
+  const { upsertServer, upsertGroup, upsertCredential, upsertSnippet } = useAppStore()
   const servers = useAppStore((s) => s.servers)
   const groups = useAppStore((s) => s.groups)
   const [state, setState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
@@ -18,11 +18,21 @@ export default function ExportPanel() {
   const [awaitingMrngPassword, setAwaitingMrngPassword] = useState(false)
   const [mrngPassword, setMrngPassword] = useState('')
 
-  const applyResult = (result: { servers: any[]; groups: any[]; skipped?: number }) => {
+  const applyResult = (result: { servers: any[]; groups: any[]; credentials?: any[]; snippets?: any[]; skipped?: number }) => {
     result.servers.forEach(upsertServer)
     result.groups.forEach(upsertGroup)
+    // Credentials/snippets only come from CorpSSH exports (mRemoteNG has none),
+    // so guard with optional chaining before reflecting them in the UI store.
+    result.credentials?.forEach(upsertCredential)
+    result.snippets?.forEach(upsertSnippet)
     setState('ok')
-    const base = `Imported: ${result.servers.length} server${result.servers.length !== 1 ? 's' : ''}, ${result.groups.length} group${result.groups.length !== 1 ? 's' : ''}`
+    const parts = [
+      `${result.servers.length} server${result.servers.length !== 1 ? 's' : ''}`,
+      `${result.groups.length} group${result.groups.length !== 1 ? 's' : ''}`
+    ]
+    if (result.credentials?.length) parts.push(`${result.credentials.length} credencial${result.credentials.length !== 1 ? 'is' : ''}`)
+    if (result.snippets?.length) parts.push(`${result.snippets.length} snippet${result.snippets.length !== 1 ? 's' : ''}`)
+    const base = `Imported: ${parts.join(', ')}`
     setMessage(result.skipped ? `${base} (${result.skipped} ignorado${result.skipped !== 1 ? 's' : ''}: protocolo não suportado)` : base)
   }
 

@@ -1,17 +1,51 @@
-import type { ServerRecord, GroupRecord } from './store'
+import type { ServerRecord, GroupRecord, CredentialRecord, SnippetRecord } from './store'
 import { sealWithPassword, openWithPassword, type SealedBlob } from './crypto'
 
-export function exportToXML(servers: ServerRecord[], groups: GroupRecord[]): string {
-  const groupsXml = groups.map((g) =>
+// ─── XML fragment builders ───────────────────────────────────────────────────
+// Shared between the two export flavours so the metadata stays identical and only
+// the secret-bearing fields differ.
+function groupsBlock(groups: GroupRecord[]): string {
+  return groups.map((g) =>
     `    <Group id="${esc(g.id)}" name="${esc(g.name)}" color="${esc(g.color ?? '')}" />`
   ).join('\n')
+}
 
-  const serversXml = servers.map((s) =>
-    `    <Server\n` +
+// A server's non-secret metadata. credentialId is included so a server that uses
+// the vault stays linked to its credential after a round-trip.
+function serverHead(s: ServerRecord): string {
+  return (
     `      id="${esc(s.id)}" name="${esc(s.name)}" host="${esc(s.host)}" port="${s.port}"\n` +
     `      username="${esc(s.username)}" authMethod="${esc(s.authMethod)}"\n` +
+    `      credentialId="${esc(s.credentialId ?? '')}"\n` +
     `      groupId="${esc(s.groupId ?? '')}" color="${esc(s.color ?? '')}"\n` +
-    `      tags="${esc((s.tags ?? []).join(','))}" notes="${esc(s.notes ?? '')}" />`
+    `      tags="${esc((s.tags ?? []).join(','))}" notes="${esc(s.notes ?? '')}"`
+  )
+}
+
+function snippetsBlock(snippets: SnippetRecord[]): string {
+  return snippets.map((s) =>
+    `    <Snippet id="${esc(s.id)}" name="${esc(s.name)}" command="${esc(s.command)}" description="${esc(s.description ?? '')}" />`
+  ).join('\n')
+}
+
+// Vault credentials WITH their secrets. Only ever emitted inside the encrypted
+// envelope, never in the plaintext export.
+function credentialsBlock(credentials: CredentialRecord[]): string {
+  return credentials.map((c) =>
+    `    <Credential\n` +
+    `      id="${esc(c.id)}" name="${esc(c.name)}" username="${esc(c.username)}" authMethod="${esc(c.authMethod)}"\n` +
+    `      password="${esc(c.password ?? '')}" privateKeyPath="${esc(c.privateKeyPath ?? '')}"\n` +
+    `      privateKeyContent="${esc(c.privateKeyContent ?? '')}" passphrase="${esc(c.passphrase ?? '')}" />`
+  ).join('\n')
+}
+
+export function exportToXML(
+  servers: ServerRecord[],
+  groups: GroupRecord[],
+  snippets: SnippetRecord[] = []
+): string {
+  const serversXml = servers.map((s) =>
+    `    <Server\n${serverHead(s)} />`
   ).join('\n')
 
   return [
@@ -19,29 +53,32 @@ export function exportToXML(servers: ServerRecord[], groups: GroupRecord[]): str
     `<!-- CorpSSH Export - ${new Date().toISOString()} -->`,
     '<CorpSSH version="1.0">',
     '  <Groups>',
-    groupsXml || '    <!-- no groups -->',
+    groupsBlock(groups) || '    <!-- no groups -->',
     '  </Groups>',
     '  <Servers>',
     serversXml || '    <!-- no servers -->',
     '  </Servers>',
+    '  <Snippets>',
+    snippetsBlock(snippets) || '    <!-- no snippets -->',
+    '  </Snippets>',
     '</CorpSSH>'
   ].join('\n')
 }
 
-export function exportToXMLWithCredentials(servers: ServerRecord[], groups: GroupRecord[]): string {
-  const groupsXml = groups.map((g) =>
-    `    <Group id="${esc(g.id)}" name="${esc(g.name)}" color="${esc(g.color ?? '')}" />`
-  ).join('\n')
-
+export function exportToXMLWithCredentials(
+  servers: ServerRecord[],
+  groups: GroupRecord[],
+  credentials: CredentialRecord[] = [],
+  snippets: SnippetRecord[] = []
+): string {
+  // Servers keep their own inline secrets (for those NOT using the vault); the
+  // vault itself is exported as a separate <Credentials> block.
   const serversXml = servers.map((s) =>
-    `    <Server\n` +
-    `      id="${esc(s.id)}" name="${esc(s.name)}" host="${esc(s.host)}" port="${s.port}"\n` +
-    `      username="${esc(s.username)}" authMethod="${esc(s.authMethod)}"\n` +
+    `    <Server\n${serverHead(s)}\n` +
     `      password="${esc(s.password ?? '')}"\n` +
     `      privateKeyPath="${esc(s.privateKeyPath ?? '')}"\n` +
-    `      passphrase="${esc(s.passphrase ?? '')}"\n` +
-    `      groupId="${esc(s.groupId ?? '')}" color="${esc(s.color ?? '')}"\n` +
-    `      tags="${esc((s.tags ?? []).join(','))}" notes="${esc(s.notes ?? '')}" />`
+    `      privateKeyContent="${esc(s.privateKeyContent ?? '')}"\n` +
+    `      passphrase="${esc(s.passphrase ?? '')}" />`
   ).join('\n')
 
   return [
@@ -50,11 +87,17 @@ export function exportToXMLWithCredentials(servers: ServerRecord[], groups: Grou
     `<!-- AVISO: Este arquivo contém senhas em texto puro. Guarde com segurança. -->`,
     '<CorpSSH version="1.0" includesCredentials="true">',
     '  <Groups>',
-    groupsXml || '    <!-- no groups -->',
+    groupsBlock(groups) || '    <!-- no groups -->',
     '  </Groups>',
+    '  <Credentials>',
+    credentialsBlock(credentials) || '    <!-- no credentials -->',
+    '  </Credentials>',
     '  <Servers>',
     serversXml || '    <!-- no servers -->',
     '  </Servers>',
+    '  <Snippets>',
+    snippetsBlock(snippets) || '    <!-- no snippets -->',
+    '  </Snippets>',
     '</CorpSSH>'
   ].join('\n')
 }
@@ -101,14 +144,22 @@ export function decryptXMLEnvelope(xml: string, password: string): string {
 export interface ImportResult {
   servers: ServerRecord[]
   groups: GroupRecord[]
+  credentials: CredentialRecord[]
+  snippets: SnippetRecord[]
 }
 
 export function importFromXML(xmlContent: string): ImportResult {
   const groups: GroupRecord[] = []
   const servers: ServerRecord[] = []
+  const credentials: CredentialRecord[] = []
+  const snippets: SnippetRecord[] = []
+
+  // NOTE: we match attributes with [^>] (not [^/]) because attribute values
+  // legitimately contain "/" (key paths, snippet commands). esc() escapes ">"
+  // so it never appears literally inside a value, making [^>] safe.
 
   // Parse Groups
-  const groupMatches = xmlContent.matchAll(/<Group\s([^/]*?)\/>/gs)
+  const groupMatches = xmlContent.matchAll(/<Group\s([^>]*?)\/>/gs)
   for (const match of groupMatches) {
     const attrs = parseAttrs(match[1])
     if (attrs.id && attrs.name) {
@@ -116,8 +167,26 @@ export function importFromXML(xmlContent: string): ImportResult {
     }
   }
 
+  // Parse Credentials (vault) — only present in credential-bearing exports
+  const credMatches = xmlContent.matchAll(/<Credential\s([^>]*?)\/>/gs)
+  for (const match of credMatches) {
+    const attrs = parseAttrs(match[1])
+    if (attrs.id && attrs.name) {
+      credentials.push({
+        id: attrs.id,
+        name: attrs.name,
+        username: attrs.username || '',
+        authMethod: (attrs.authMethod as any) || 'password',
+        password: attrs.password || undefined,
+        privateKeyPath: attrs.privateKeyPath || undefined,
+        privateKeyContent: attrs.privateKeyContent || undefined,
+        passphrase: attrs.passphrase || undefined
+      })
+    }
+  }
+
   // Parse Servers
-  const serverMatches = xmlContent.matchAll(/<Server\s([^/]*?)\/>/gs)
+  const serverMatches = xmlContent.matchAll(/<Server\s([^>]*?)\/>/gs)
   for (const match of serverMatches) {
     const attrs = parseAttrs(match[1])
     if (attrs.id && attrs.host) {
@@ -130,7 +199,9 @@ export function importFromXML(xmlContent: string): ImportResult {
         authMethod: (attrs.authMethod as any) || 'password',
         password: attrs.password || undefined,
         privateKeyPath: attrs.privateKeyPath || undefined,
+        privateKeyContent: attrs.privateKeyContent || undefined,
         passphrase: attrs.passphrase || undefined,
+        credentialId: attrs.credentialId || undefined,
         groupId: attrs.groupId || undefined,
         color: attrs.color || undefined,
         tags: attrs.tags ? attrs.tags.split(',').filter(Boolean) : [],
@@ -139,7 +210,21 @@ export function importFromXML(xmlContent: string): ImportResult {
     }
   }
 
-  return { servers, groups }
+  // Parse Snippets
+  const snippetMatches = xmlContent.matchAll(/<Snippet\s([^>]*?)\/>/gs)
+  for (const match of snippetMatches) {
+    const attrs = parseAttrs(match[1])
+    if (attrs.id && attrs.name) {
+      snippets.push({
+        id: attrs.id,
+        name: attrs.name,
+        command: attrs.command || '',
+        description: attrs.description || undefined
+      })
+    }
+  }
+
+  return { servers, groups, credentials, snippets }
 }
 
 function parseAttrs(attrsStr: string): Record<string, string> {
