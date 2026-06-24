@@ -336,11 +336,35 @@ export function setupIpcHandlers(): void {
   })
 
   // --- VNC ---
+  // Two reachability modes:
+  //  • direct      → the VNC server is reachable on the LAN; proxy dials host:port.
+  //  • via jumpHost→ tunnel through a saved SSH bastion (e.g. a VPS that the
+  //                  headless box keeps a reverse tunnel into). We open a real
+  //                  SSH session to the bastion, then forward to host:port as the
+  //                  bastion sees it (typically 127.0.0.1:5900). The session is
+  //                  torn down with the VNC window (see closeVNCSession).
   ipcMain.handle('vnc:connect', async (_e, config) => {
     const sessionId = generateId()
-    const wsPort = await createVNCProxy(sessionId, config.host, config.port)
+
+    let viaSessionId: string | undefined
+    if (config.jumpHostId) {
+      const jumpSrv = getServers().find((s) => s.id === config.jumpHostId && (s.protocol ?? 'ssh') === 'ssh')
+      if (!jumpSrv) throw new Error('Jump host not found or is not an SSH host')
+      const auth = resolveServerAuth(jumpSrv.id)
+      const sshConfig: any = {
+        ...jumpSrv,
+        ...(auth ?? {}),
+        strictHostKey: strict(),
+        // The bastion may itself sit behind further jumps.
+        jumpHost: buildJump(jumpSrv.jumpHostId, new Set([jumpSrv.id]))
+      }
+      viaSessionId = generateId()
+      await createSSHConnection(viaSessionId, sshConfig)
+    }
+
+    const wsPort = await createVNCProxy(sessionId, config.host, config.port, viaSessionId)
     openVNCWindow(sessionId, wsPort, config.name ?? config.host, `${config.host}:${config.port}`, config.vncPassword)
-    addLogEntry({ type: 'connect', serverId: config.id ?? '', serverName: config.name ?? config.host, host: `${config.host}:${config.port}`, username: config.username ?? 'vnc', message: 'VNC' })
+    addLogEntry({ type: 'connect', serverId: config.id ?? '', serverName: config.name ?? config.host, host: `${config.host}:${config.port}`, username: config.username ?? 'vnc', message: config.jumpHostId ? 'VNC (tunnel)' : 'VNC' })
     return { sessionId, wsPort }
   })
   ipcMain.handle('vnc:disconnect', (_e, sessionId: string) => {

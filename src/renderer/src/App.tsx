@@ -135,7 +135,16 @@ export default function App() {
     }
 
     if (proto === 'vnc') {
-      alert('VNC: Feature in development.\nThis functionality is not yet available in this version.')
+      try {
+        await window.api.vnc.connect({
+          id: server.id, name: server.name,
+          host: server.host, port: server.port,
+          vncPassword: server.vncPassword,
+          jumpHostId: server.jumpHostId
+        })
+      } catch (e) {
+        alert(`VNC: ${(e as Error)?.message ?? 'Connection failed'}`)
+      }
       return
     }
 
