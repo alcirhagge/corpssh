@@ -23,6 +23,10 @@ export interface SSHConnectionConfig {
   /** Optional bastion to tunnel THROUGH before reaching this host (ProxyJump -J).
    *  May itself carry a jumpHost, giving multi-hop chains for free. */
   jumpHost?: SSHConnectionConfig
+  /** Negotiate zlib compression on the SSH transport. Off by default (terminals
+   *  don't benefit and it adds CPU); enabled for VNC tunnels, where the raw
+   *  framebuffer compresses heavily and the link is the bottleneck. */
+  compress?: boolean
 }
 
 // Thrown when a host presents a different key than the one we pinned (possible
@@ -280,7 +284,10 @@ export async function createSSHConnection(
       ...(config.strictHostKey === false ? {} : { hostVerifier }),
       tryKeyboard: true,
       // RSA-first host keys keep legacy switches happy; see SSH_ALGORITHMS.
-      algorithms: SSH_ALGORITHMS
+      // VNC carriers opt into zlib so the raw framebuffer rides compressed.
+      algorithms: config.compress
+        ? { ...SSH_ALGORITHMS, compress: ['zlib@openssh.com', 'zlib', 'none'] }
+        : SSH_ALGORITHMS
     }
 
     let remoteIdent = ''

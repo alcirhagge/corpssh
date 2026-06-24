@@ -355,6 +355,8 @@ export function setupIpcHandlers(): void {
         ...jumpSrv,
         ...(auth ?? {}),
         strictHostKey: strict(),
+        // Raw VNC framebuffer compresses heavily — ride the tunnel zipped.
+        compress: true,
         // The bastion may itself sit behind further jumps.
         jumpHost: buildJump(jumpSrv.jumpHostId, new Set([jumpSrv.id]))
       }
