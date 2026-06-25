@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer, clipboard } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 
 const api = {
   // Native clipboard — synchronous and instant (the async navigator.clipboard
@@ -241,15 +240,16 @@ const api = {
   }
 }
 
+// Only the curated `api` is exposed. The generic electronAPI (whole ipcRenderer,
+// webFrame, process.env) is deliberately NOT exposed: it would let any renderer
+// XSS invoke arbitrary IPC channels / read env, bypassing this allowlist.
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
   } catch (e) {
     console.error(e)
   }
 } else {
-  ;(window as any).electron = electronAPI
   ;(window as any).api = api
 }
 

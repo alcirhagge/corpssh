@@ -206,7 +206,10 @@ function startDynamic(sessionId: string, cfg: TunnelConfig): ActiveTunnel {
   })
 
   server.on('error', (e) => { t.status = 'error'; t.error = e.message; broadcast() })
-  server.listen(cfg.bindPort, cfg.bindAddr ?? DEFAULT_BIND)
+  // The SOCKS5 proxy accepts "no authentication", so binding it to anything but
+  // loopback would expose an open relay into the remote network to the whole LAN.
+  // Always bind to 127.0.0.1, ignoring any requested bindAddr for dynamic tunnels.
+  server.listen(cfg.bindPort, DEFAULT_BIND)
   t.server = server
   return t
 }

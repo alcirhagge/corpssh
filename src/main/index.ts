@@ -87,11 +87,29 @@ function createWindow(): void {
     icon: appIcon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }
   })
+
+  // Content-Security-Policy for the renderer. Only in production: the dev server
+  // needs inline/eval + ws for HMR, which a strict CSP would break. The packaged
+  // renderer is a static local bundle, so 'self' + inline styles is enough.
+  if (!is.dev) {
+    mainWindow.webContents.session.webRequest.onHeadersReceived((details, cb) => {
+      cb({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; " +
+            "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+          ]
+        }
+      })
+    })
+  }
 
   mainWindow.on('ready-to-show', () => {
     mainWindow!.show()
@@ -105,8 +123,19 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    // Never open in-app popups; only hand off safe external schemes to the OS.
+    if (/^https?:\/\//i.test(details.url) || details.url.startsWith('mailto:')) {
+      shell.openExternal(details.url)
+    }
     return { action: 'deny' }
+  })
+
+  // The app is a single local page. Block any attempt to navigate the main
+  // window away from it (e.g. a malicious link or injected content).
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+    const ok = is.dev && rendererUrl ? url.startsWith(rendererUrl) : url.startsWith('file://')
+    if (!ok) event.preventDefault()
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {

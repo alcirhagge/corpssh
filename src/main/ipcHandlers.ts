@@ -209,8 +209,8 @@ export function setupIpcHandlers(): void {
   // Export with credentials is ALWAYS encrypted now: the credential-bearing XML
   // is sealed with the user's password before hitting disk.
   ipcMain.handle('xml:exportWithCredentials', async (_e, password: string) => {
-    if (!password || password.length < 4) {
-      throw new Error('Senha de exportacao muito curta (minimo 4 caracteres)')
+    if (!password || password.length < 8) {
+      throw new Error('Senha de exportacao muito curta (minimo 8 caracteres)')
     }
     const win = BrowserWindow.getAllWindows()[0]
     const result = await dialog.showSaveDialog(win, {

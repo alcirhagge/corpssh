@@ -38,8 +38,8 @@ export default function ExportPanel() {
 
   const handleExport = async () => {
     if (includeCredentials) {
-      if (exportPassword.length < 4) {
-        setState('error'); setMessage('Defina uma senha de pelo menos 4 caracteres'); return
+      if (exportPassword.length < 8) {
+        setState('error'); setMessage('Defina uma senha de pelo menos 8 caracteres'); return
       }
       if (exportPassword !== exportPasswordConfirm) {
         setState('error'); setMessage('As senhas não coincidem'); return

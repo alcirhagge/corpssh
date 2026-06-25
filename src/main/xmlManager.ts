@@ -10,13 +10,16 @@ function groupsBlock(groups: GroupRecord[]): string {
   ).join('\n')
 }
 
-// A server's non-secret metadata. credentialId is included so a server that uses
-// the vault stays linked to its credential after a round-trip.
+// A server's non-secret metadata. credentialId keeps a vault link across a
+// round-trip; jumpHostId keeps the ProxyJump bastion reference (it points at
+// another exported server's id, so the chain survives). protocol/rdp* preserve
+// the connection type and RDP launch prefs.
 function serverHead(s: ServerRecord): string {
   return (
     `      id="${esc(s.id)}" name="${esc(s.name)}" host="${esc(s.host)}" port="${s.port}"\n` +
     `      username="${esc(s.username)}" authMethod="${esc(s.authMethod)}"\n` +
-    `      credentialId="${esc(s.credentialId ?? '')}"\n` +
+    `      protocol="${esc(s.protocol ?? '')}" credentialId="${esc(s.credentialId ?? '')}" jumpHostId="${esc(s.jumpHostId ?? '')}"\n` +
+    `      rdpDomain="${esc(s.rdpDomain ?? '')}" rdpFullscreen="${s.rdpFullscreen === undefined ? '' : String(s.rdpFullscreen)}"\n` +
     `      groupId="${esc(s.groupId ?? '')}" color="${esc(s.color ?? '')}"\n` +
     `      tags="${esc((s.tags ?? []).join(','))}" notes="${esc(s.notes ?? '')}"`
   )
@@ -78,6 +81,7 @@ export function exportToXMLWithCredentials(
     `      password="${esc(s.password ?? '')}"\n` +
     `      privateKeyPath="${esc(s.privateKeyPath ?? '')}"\n` +
     `      privateKeyContent="${esc(s.privateKeyContent ?? '')}"\n` +
+    `      vncPassword="${esc(s.vncPassword ?? '')}"\n` +
     `      passphrase="${esc(s.passphrase ?? '')}" />`
   ).join('\n')
 
@@ -119,7 +123,7 @@ export function encryptXMLEnvelope(innerXml: string, password: string): string {
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<!-- CorpSSH Encrypted Export - ${new Date().toISOString()} -->`,
     '<!-- Arquivo criptografado. Importe no CorpSSH usando a senha definida na exportacao. -->',
-    `<${ENCRYPTED_ROOT} version="1.0" kdf="scrypt" cipher="aes-256-gcm"`,
+    `<${ENCRYPTED_ROOT} version="1.0" kdf="scrypt" cipher="aes-256-gcm" n="${blob.n ?? ''}"`,
     `  salt="${blob.salt}" iv="${blob.iv}" tag="${blob.tag}">${blob.data}</${ENCRYPTED_ROOT}>`
   ].join('\n')
 }
@@ -133,7 +137,10 @@ export function decryptXMLEnvelope(xml: string, password: string): string {
   if (!attrs.salt || !attrs.iv || !attrs.tag || !data) {
     throw new Error('Arquivo criptografado incompleto')
   }
-  const blob: SealedBlob = { salt: attrs.salt, iv: attrs.iv, tag: attrs.tag, data }
+  const blob: SealedBlob = {
+    salt: attrs.salt, iv: attrs.iv, tag: attrs.tag, data,
+    n: attrs.n ? parseInt(attrs.n, 10) : undefined
+  }
   try {
     return openWithPassword(blob, password)
   } catch {
@@ -174,8 +181,8 @@ export function importFromXML(xmlContent: string): ImportResult {
     if (attrs.id && attrs.name) {
       credentials.push({
         id: attrs.id,
-        name: attrs.name,
-        username: attrs.username || '',
+        name: noCtrl(attrs.name)!,
+        username: noCtrl(attrs.username) || '',
         authMethod: (attrs.authMethod as any) || 'password',
         password: attrs.password || undefined,
         privateKeyPath: attrs.privateKeyPath || undefined,
@@ -192,16 +199,21 @@ export function importFromXML(xmlContent: string): ImportResult {
     if (attrs.id && attrs.host) {
       servers.push({
         id: attrs.id,
-        name: attrs.name || attrs.host,
-        host: attrs.host,
+        name: noCtrl(attrs.name) || noCtrl(attrs.host)!,
+        host: noCtrl(attrs.host)!,
         port: parseInt(attrs.port ?? '22') || 22,
-        username: attrs.username || '',
+        username: noCtrl(attrs.username) || '',
+        protocol: (attrs.protocol as any) || undefined,
         authMethod: (attrs.authMethod as any) || 'password',
         password: attrs.password || undefined,
         privateKeyPath: attrs.privateKeyPath || undefined,
         privateKeyContent: attrs.privateKeyContent || undefined,
         passphrase: attrs.passphrase || undefined,
+        vncPassword: attrs.vncPassword || undefined,
+        rdpDomain: noCtrl(attrs.rdpDomain) || undefined,
+        rdpFullscreen: attrs.rdpFullscreen === 'true' ? true : attrs.rdpFullscreen === 'false' ? false : undefined,
         credentialId: attrs.credentialId || undefined,
+        jumpHostId: attrs.jumpHostId || undefined,
         groupId: attrs.groupId || undefined,
         color: attrs.color || undefined,
         tags: attrs.tags ? attrs.tags.split(',').filter(Boolean) : [],
@@ -251,4 +263,14 @@ function unesc(s: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&')
+}
+
+// Strip control characters (incl. CR/LF) from imported values that later flow
+// into shell arguments, generated .rdp directives or connection URLs. A newline
+// in host/username/domain would otherwise let a malicious .xml inject extra
+// directives/args (e.g. drivestoredirect into the .rdp file). Defense at the
+// import boundary so every downstream sink is covered at once.
+function noCtrl(s?: string): string | undefined {
+  if (s == null) return undefined
+  return s.replace(/[\u0000-\u001f\u007f]/g, '')
 }

@@ -14,6 +14,25 @@ export interface RDPConfig {
   fullscreen?: boolean
 }
 
+// Strip control characters (incl. CR/LF). A newline in host/username/domain would
+// otherwise inject extra directives into the generated .rdp file or extra tokens
+// into the cmdkey/xfreerdp argument list. charCode-based to keep the source ASCII.
+function stripCtrl(s?: string): string | undefined {
+  if (s == null) return undefined
+  let out = ''
+  for (const ch of s) { const c = ch.charCodeAt(0); if (c >= 0x20 && c !== 0x7f) out += ch }
+  return out
+}
+
+function sanitizeRDP(cfg: RDPConfig): RDPConfig {
+  return {
+    ...cfg,
+    host: stripCtrl(cfg.host) ?? '',
+    username: stripCtrl(cfg.username) ?? '',
+    domain: stripCtrl(cfg.domain)
+  }
+}
+
 function buildRDPFile(cfg: RDPConfig): string {
   const width = cfg.width ?? 1280
   const height = cfg.height ?? 800
@@ -63,6 +82,7 @@ function buildRDPFile(cfg: RDPConfig): string {
 }
 
 export async function launchRDP(cfg: RDPConfig): Promise<{ ok: boolean; message: string }> {
+  cfg = sanitizeRDP(cfg)
   const platform = process.platform
 
   if (platform === 'win32') {

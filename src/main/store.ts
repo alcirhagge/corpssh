@@ -32,7 +32,7 @@ function decrypt(value?: string): string | undefined {
   }
 }
 
-const SERVER_SECRETS: (keyof ServerRecord)[] = ['password', 'passphrase', 'privateKeyContent']
+const SERVER_SECRETS: (keyof ServerRecord)[] = ['password', 'passphrase', 'privateKeyContent', 'vncPassword']
 const CRED_SECRETS: (keyof CredentialRecord)[] = ['password', 'passphrase', 'privateKeyContent']
 
 function mapSecrets<T>(rec: T, keys: (keyof T)[], fn: (v?: string) => string | undefined): T {

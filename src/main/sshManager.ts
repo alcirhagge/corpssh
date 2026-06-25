@@ -928,6 +928,15 @@ export function detectRemoteOs(config: SSHConnectionConfig): Promise<string> {
       if (config.passphrase) connectConfig.passphrase = config.passphrase
     }
 
+    // Verify the host key BEFORE auth so the probe never sends credentials to a
+    // host whose key has CHANGED (MITM). New hosts pin via TOFU exactly like the
+    // real connection; only a mismatch aborts the handshake (→ 'unknown'), so no
+    // credential ever reaches an impostor key. Skipped only when strict is off.
+    if (config.strictHostKey !== false) {
+      connectConfig.hostVerifier = (keyBuf: Buffer): boolean =>
+        verifyHostKey(config.host, config.port, keyBuf).status !== 'changed'
+    }
+
     let remoteIdent = ''
     connectConfig.debug = (m: string) => {
       const im = /Remote ident:\s*'([^']*)'/i.exec(m)

@@ -7,19 +7,27 @@ import { scryptSync, randomBytes, createCipheriv, createDecipheriv, createHmac, 
 // encrypted XML export/import and, later, for sealing secrets synced to the cloud.
 
 const KEYLEN = 32 // AES-256
-// scrypt cost: N=16384,r=8,p=1 → ~16 MB working memory; raise maxmem headroom so
-// it never trips the default 32 MB cap on slower/older runtimes.
-const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
+// scrypt cost. N is now stored per-sealed-blob so it can be raised without
+// breaking files sealed with the old cost. New seals use SCRYPT_N; blobs lacking
+// a stored N (made before this change) are opened with LEGACY_SCRYPT_N.
+const SCRYPT_N = 1 << 17        // 131072 → ~128 MB working memory (current strength)
+const LEGACY_SCRYPT_N = 1 << 14 // 16384 → original strength, for back-compat
+const SCRYPT_R = 8
+const SCRYPT_P = 1
+const SCRYPT_MAXMEM = 256 * 1024 * 1024 // headroom above 128 MB so N=2^17 never trips the cap
+// Used by the (currently dormant) cloud key-derivation helpers below.
+const SCRYPT_PARAMS = { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: SCRYPT_MAXMEM }
 
 export interface SealedBlob {
   salt: string // base64 (16 bytes)
   iv: string // base64 (12 bytes — GCM nonce)
   tag: string // base64 (16 bytes — GCM auth tag)
   data: string // base64 ciphertext
+  n?: number // scrypt cost used; absent ⇒ LEGACY_SCRYPT_N
 }
 
-function deriveKey(password: string, salt: Buffer): Buffer {
-  return scryptSync(password, salt, KEYLEN, SCRYPT_PARAMS)
+function deriveKey(password: string, salt: Buffer, n: number = SCRYPT_N): Buffer {
+  return scryptSync(password, salt, KEYLEN, { N: n, r: SCRYPT_R, p: SCRYPT_P, maxmem: SCRYPT_MAXMEM })
 }
 
 // Encrypt a UTF-8 string with a password. A fresh random salt + IV is generated
@@ -27,7 +35,7 @@ function deriveKey(password: string, salt: Buffer): Buffer {
 export function sealWithPassword(plaintext: string, password: string): SealedBlob {
   const salt = randomBytes(16)
   const iv = randomBytes(12)
-  const key = deriveKey(password, salt)
+  const key = deriveKey(password, salt, SCRYPT_N)
   const cipher = createCipheriv('aes-256-gcm', key, iv)
   const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
   const tag = cipher.getAuthTag()
@@ -35,18 +43,20 @@ export function sealWithPassword(plaintext: string, password: string): SealedBlo
     salt: salt.toString('base64'),
     iv: iv.toString('base64'),
     tag: tag.toString('base64'),
-    data: enc.toString('base64')
+    data: enc.toString('base64'),
+    n: SCRYPT_N
   }
 }
 
 // Decrypt a blob produced by sealWithPassword. Throws if the password is wrong
 // (GCM auth-tag mismatch) or the blob is corrupt — callers should treat any throw
-// as "wrong password / bad file".
+// as "wrong password / bad file". Uses the blob's stored N, falling back to the
+// legacy cost for blobs sealed before N was recorded.
 export function openWithPassword(blob: SealedBlob, password: string): string {
   const salt = Buffer.from(blob.salt, 'base64')
   const iv = Buffer.from(blob.iv, 'base64')
   const tag = Buffer.from(blob.tag, 'base64')
-  const key = deriveKey(password, salt)
+  const key = deriveKey(password, salt, blob.n ?? LEGACY_SCRYPT_N)
   const decipher = createDecipheriv('aes-256-gcm', key, iv)
   decipher.setAuthTag(tag)
   const dec = Buffer.concat([decipher.update(Buffer.from(blob.data, 'base64')), decipher.final()])
@@ -64,7 +74,9 @@ export function newSaltB64(): string {
 }
 
 export function deriveMasterKey(password: string, saltB64: string): Buffer {
-  return deriveKey(password, Buffer.from(saltB64, 'base64'))
+  // Cloud path keeps the legacy cost for now (dormant/to-be-reworked) so any
+  // already-synced secrets stay decryptable. Revisit when cloud is rebuilt.
+  return deriveKey(password, Buffer.from(saltB64, 'base64'), LEGACY_SCRYPT_N)
 }
 
 // Compact sealed value for a pre-derived key: { iv, data } where data is the

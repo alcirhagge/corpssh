@@ -11,6 +11,8 @@ export interface RemoteLogConfig {
   token?: string
   index?: string
   tls?: boolean
+  /** Opt-in: accept self-signed/invalid TLS certs (lab use only). Default false. */
+  allowInsecureTLS?: boolean
 }
 
 let currentConfig: RemoteLogConfig | null = null
@@ -68,7 +70,7 @@ async function sendGELF(entry: LogEntry, cfg: RemoteLogConfig): Promise<void> {
     _duration_ms: entry.duration,
     _message: entry.message
   })
-  await httpPost({ host: cfg.host, port: cfg.port, path: '/gelf', tls: cfg.tls }, body)
+  await httpPost({ host: cfg.host, port: cfg.port, path: '/gelf', tls: cfg.tls, insecure: cfg.allowInsecureTLS }, body)
 }
 
 // ─── Grafana Loki ───────────────────────────────────────────────────────
@@ -84,7 +86,7 @@ async function sendLoki(entry: LogEntry, cfg: RemoteLogConfig): Promise<void> {
   })
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (cfg.token) headers['Authorization'] = `Bearer ${cfg.token}`
-  await httpPost({ host: cfg.host, port: cfg.port, path: '/loki/api/v1/push', tls: cfg.tls, headers }, body)
+  await httpPost({ host: cfg.host, port: cfg.port, path: '/loki/api/v1/push', tls: cfg.tls, headers, insecure: cfg.allowInsecureTLS }, body)
 }
 
 // ─── Elasticsearch ──────────────────────────────────────────────────────
@@ -102,7 +104,7 @@ async function sendElastic(entry: LogEntry, cfg: RemoteLogConfig): Promise<void>
   })
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (cfg.token) headers['Authorization'] = `ApiKey ${cfg.token}`
-  await httpPost({ host: cfg.host, port: cfg.port, path: `/${index}/_doc`, tls: cfg.tls, headers }, body)
+  await httpPost({ host: cfg.host, port: cfg.port, path: `/${index}/_doc`, tls: cfg.tls, headers, insecure: cfg.allowInsecureTLS }, body)
 }
 
 // ─── Syslog UDP RFC5424 ─────────────────────────────────────────────────
@@ -127,7 +129,7 @@ async function sendSyslog(entry: LogEntry, cfg: RemoteLogConfig): Promise<void> 
 
 // ─── HTTP helper ────────────────────────────────────────────────────────
 function httpPost(opts: {
-  host: string; port: number; path: string; tls?: boolean; headers?: Record<string, string>
+  host: string; port: number; path: string; tls?: boolean; headers?: Record<string, string>; insecure?: boolean
 }, body: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const mod = opts.tls ? https : http
@@ -141,7 +143,8 @@ function httpPost(opts: {
         'Content-Length': Buffer.byteLength(body),
         ...(opts.headers ?? {})
       },
-      rejectUnauthorized: false,
+      // Verify TLS by default; only skip when the user explicitly opts in.
+      rejectUnauthorized: !opts.insecure,
       timeout: 5000
     }, (res) => {
       res.resume()

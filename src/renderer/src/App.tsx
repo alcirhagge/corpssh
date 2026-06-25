@@ -23,7 +23,7 @@ export default function App() {
   const {
     setServers, setGroups, setKeys, setCredentials, setSnippets, setSettings,
     addTab, updateTab, removeTab, setActiveTab, setActivePage,
-    upsertServer, theme, setTheme, addLog, setCloudRecovery,
+    upsertServer, theme, setTheme, addLog,
     servers, tabs, activeTabId, activePage, rightPanel, settings
   } = useAppStore()
 
@@ -73,13 +73,10 @@ export default function App() {
       setCredentials(c)
     })
 
-    // Password-recovery deep link (corpssh://) → go to Cloud page with the tokens.
-    const unsubRecovery = window.api.cloud.onRecovery((payload) => {
-      setCloudRecovery(payload)
-      setActivePage('cloud')
-    })
+    // Cloud temporariamente removido da UI: o deep-link de recovery não navega
+    // mais para a página escondida. Backend de cloud permanece inerte.
 
-    return () => { unsub(); unsubOs(); unsubCloud(); unsubRecovery() }
+    return () => { unsub(); unsubOs(); unsubCloud() }
   }, [])
 
   const openSSHTab = async (
