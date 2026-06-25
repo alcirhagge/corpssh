@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useAppStore } from './store/appStore'
 import TitleBar from './components/Layout/TitleBar'
@@ -34,6 +34,16 @@ function slotRect(layout: PaneLayout, idx: number): CSSProperties {
   return { top: row ? '50%' : 0, left: col ? '50%' : 0, width: '50%', height: '50%' }
 }
 
+// Which grid slot a cursor point falls in (for Alt+drag rearrange).
+function slotAtPoint(layout: PaneLayout, rect: DOMRect, clientX: number, clientY: number): number {
+  const x = (clientX - rect.left) / rect.width
+  const y = (clientY - rect.top) / rect.height
+  if (layout === '2v') return x < 0.5 ? 0 : 1
+  if (layout === '2h') return y < 0.5 ? 0 : 1
+  if (layout === '2x2') return (y < 0.5 ? 0 : 2) + (x < 0.5 ? 0 : 1)
+  return 0
+}
+
 export default function App() {
   const {
     setServers, setGroups, setKeys, setCredentials, setSnippets, setSettings,
@@ -41,6 +51,33 @@ export default function App() {
     upsertServer, theme, setTheme, addLog,
     servers, tabs, activeTabId, paneLayout, panes, activePage, rightPanel, settings
   } = useAppStore()
+
+  // Alt+drag to rearrange split panes. `drag` holds the source slot and the slot
+  // currently under the cursor; on release we swap them in the store.
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [drag, setDrag] = useState<{ src: number; hover: number } | null>(null)
+  const dragActive = drag !== null
+  useEffect(() => {
+    if (!dragActive) return
+    const onMove = (e: MouseEvent): void => {
+      const rect = gridRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const idx = slotAtPoint(paneLayout, rect, e.clientX, e.clientY)
+      setDrag((d) => (d && d.hover !== idx ? { ...d, hover: idx } : d))
+    }
+    const onUp = (): void => {
+      setDrag((d) => {
+        if (d && d.hover !== d.src) useAppStore.getState().swapPanes(d.src, d.hover)
+        return null
+      })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [dragActive, paneLayout])
 
   // Load data + apply theme
   useEffect(() => {
@@ -300,6 +337,7 @@ export default function App() {
                 o que causaria reinício do shell e perda do histórico. */}
             {tabs.length > 0 && (
               <div
+                ref={gridRef}
                 className="flex-1 overflow-hidden relative"
                 style={{ display: inTerminalArea ? 'block' : 'none' }}
               >
@@ -314,19 +352,37 @@ export default function App() {
                   const visible = inGrid
                   const focused = tab.id === activeTabId
                   const split = paneLayout !== '1'
+                  const isDragSrc = drag?.src === slotIdx && inGrid
+                  const isDropTarget = dragActive && drag?.hover === slotIdx && drag.hover !== drag.src && inGrid
+                  // Alt+drag (split only) starts a rearrange; plain click focuses.
+                  const onPaneMouseDown = (e: React.MouseEvent): void => {
+                    if (split && inGrid && e.altKey) {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setDrag({ src: slotIdx, hover: slotIdx })
+                      return
+                    }
+                    if (inGrid && !focused) setActiveTab(tab.id)
+                  }
                   return (
                   <div
                     key={tab.id}
                     className="absolute"
-                    onMouseDownCapture={() => { if (inGrid && !focused) setActiveTab(tab.id) }}
+                    onMouseDownCapture={onPaneMouseDown}
                     style={{
                       ...slotRect(paneLayout, slotIdx),
                       visibility: visible ? 'visible' : 'hidden',
                       pointerEvents: visible ? 'auto' : 'none',
+                      cursor: isDragSrc ? 'grabbing' : undefined,
+                      opacity: isDragSrc ? 0.55 : 1,
+                      transition: 'opacity 0.1s',
                       ...(split && inGrid
                         ? {
-                            outline: `${focused ? 2 : 1}px solid ${focused ? 'var(--accent)' : 'var(--border-subtle, var(--border))'}`,
-                            outlineOffset: '-1px'
+                            outline: isDropTarget
+                              ? '3px solid var(--accent)'
+                              : `${focused ? 2 : 1}px solid ${focused ? 'var(--accent)' : 'var(--border-subtle, var(--border))'}`,
+                            outlineOffset: '-1px',
+                            zIndex: isDragSrc ? 5 : undefined
                           }
                         : {})
                     }}
