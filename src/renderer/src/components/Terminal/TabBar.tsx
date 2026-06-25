@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Terminal, FolderOpen, Plus, Search, X, Code2, CornerDownLeft, CheckCircle2, Circle, CheckSquare, Square, Radio } from 'lucide-react'
+import { Terminal, FolderOpen, Plus, Search, X, Code2, CornerDownLeft, CheckCircle2, Circle, CheckSquare, Square, Radio, Columns, LayoutGrid } from 'lucide-react'
 import { useAppStore } from '../../store/appStore'
 import type { Tab, Server, Snippet } from '../../types'
 import { HOST_ICON_COLORS } from '../../types'
@@ -16,7 +16,7 @@ interface TabBarProps {
 interface CtxMenu { tabId: string; x: number; y: number }
 
 export default function TabBar({ kind, onCloseTab, onNewTab, onToggleSftp, onConnectServer, onBroadcastSnippet }: TabBarProps) {
-  const { tabs, activeTabId, setActiveTab, focusTerminal, broadcastInput, setBroadcastInput } = useAppStore()
+  const { tabs, activeTabId, activateTab, focusTerminal, broadcastInput, setBroadcastInput, paneLayout, panes, setPaneLayout } = useAppStore()
   const kindTabs = tabs.filter((t) => (t.kind ?? 'normal') === kind)
   // Live broadcast only makes sense with 2+ connected terminals in this strip.
   const liveCount = kindTabs.filter((t) => t.status === 'connected' && t.mode === 'terminal').length
@@ -69,7 +69,8 @@ export default function TabBar({ kind, onCloseTab, onNewTab, onToggleSftp, onCon
             key={tab.id}
             tab={tab}
             isActive={tab.id === activeTabId}
-            onClick={() => setActiveTab(tab.id)}
+            inPane={paneLayout !== '1' && panes.includes(tab.id)}
+            onClick={() => activateTab(tab.id)}
             onClose={() => onCloseTab(tab)}
             onToggleSftp={() => onToggleSftp(tab.id)}
             onContextMenu={(e) => {
@@ -105,6 +106,32 @@ export default function TabBar({ kind, onCloseTab, onNewTab, onToggleSftp, onCon
         >
           <Code2 size={15} />
         </button>
+
+        {/* Split layout controls — only on the normal strip with 2+ tabs. Toggle:
+            clicking the active layout collapses back to single. */}
+        {kind === 'normal' && kindTabs.length >= 2 && (
+          <div className="flex items-center h-full flex-shrink-0" style={{ borderLeft: '1px solid var(--border-subtle)', borderRight: '1px solid var(--border-subtle)' }}>
+            {([
+              ['2v', Columns, 'Split side by side'],
+              ['2x2', LayoutGrid, '2×2 grid']
+            ] as const).map(([layout, Icon, label]) => {
+              const on = paneLayout === layout
+              return (
+                <button
+                  key={layout}
+                  onClick={() => setPaneLayout(on ? '1' : layout)}
+                  title={on ? `${label} (active — click to unsplit)` : label}
+                  className="flex items-center justify-center h-full px-2.5"
+                  style={{ color: on ? '#fff' : 'var(--text-muted)', background: on ? 'var(--accent)' : 'transparent' }}
+                  onMouseEnter={(e) => { if (!on) e.currentTarget.style.color = 'var(--text-secondary)' }}
+                  onMouseLeave={(e) => { if (!on) e.currentTarget.style.color = 'var(--text-muted)' }}
+                >
+                  <Icon size={15} />
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         {/* Live broadcast toggle: mirror keystrokes from the focused terminal to
             every connected terminal in this strip. Only shown when 2+ are live. */}
@@ -717,13 +744,12 @@ function CtxItem({ label, icon, onClick, danger }: {
 }
 
 function TabItem({
-  tab, isActive, onClick, onClose, onToggleSftp, onContextMenu
+  tab, isActive, inPane, onClick, onClose, onToggleSftp, onContextMenu
 }: {
-  tab: Tab; isActive: boolean; onClick: () => void; onClose: () => void; onToggleSftp: () => void
+  tab: Tab; isActive: boolean; inPane?: boolean; onClick: () => void; onClose: () => void; onToggleSftp: () => void
   onContextMenu: (e: React.MouseEvent) => void
 }) {
   const [hovered, setHovered] = useState(false)
-  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const statusColor = {
     connected: 'var(--success)',
@@ -732,22 +758,10 @@ function TabItem({
     error: 'var(--error)'
   }[tab.status]
 
-  const handleClick = () => {
-    if (clickTimer.current) {
-      clearTimeout(clickTimer.current)
-      clickTimer.current = null
-      onClose()
-    } else {
-      clickTimer.current = setTimeout(() => {
-        clickTimer.current = null
-        onClick()
-      }, 220)
-    }
-  }
-
+  // Single click activates immediately (no double-click delay). The X closes.
   return (
     <div
-      className="flex items-center gap-1.5 px-3 h-full cursor-pointer relative flex-shrink-0"
+      className="flex items-center gap-1.5 pl-3 pr-1.5 h-full cursor-pointer relative flex-shrink-0"
       style={{
         background: isActive ? 'var(--bg-surface)' : hovered ? 'var(--bg-hover)' : 'transparent',
         borderRight: '1px solid var(--border-subtle)',
@@ -755,9 +769,10 @@ function TabItem({
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={handleClick}
+      onClick={onClick}
+      onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose() } }}
       onContextMenu={onContextMenu}
-      title="Click: activate · Double-click: close · Right-click: options"
+      title="Click: activate · Middle-click or ✕: close · Right-click: options"
     >
       {isActive && (
         <div
@@ -814,6 +829,29 @@ function TabItem({
       }}>
         {tab.serverName}
       </span>
+
+      {/* Shown-in-grid marker (split mode): a thin accent dot when this tab
+          occupies a pane but isn't the focused one. */}
+      {inPane && !isActive && (
+        <div className="flex-shrink-0 rounded-full" style={{ width: 5, height: 5, background: 'var(--accent)', opacity: 0.7 }} title="Shown in a split pane" />
+      )}
+
+      {/* Close — always visible on the active tab, on hover otherwise. */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onClose() }}
+        title="Close (Ctrl+Shift+W)"
+        className="flex items-center justify-center rounded flex-shrink-0 ml-0.5"
+        style={{
+          width: 18, height: 18,
+          color: 'var(--text-muted)',
+          opacity: hovered || isActive ? 1 : 0,
+          transition: 'opacity 0.12s, background 0.12s, color 0.12s'
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-active, rgba(255,255,255,0.08))'; e.currentTarget.style.color = 'var(--text-primary)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+      >
+        <X size={13} />
+      </button>
     </div>
   )
 }

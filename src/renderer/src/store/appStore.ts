@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import type { Server, Group, SSHKey, Credential, Snippet, Tab, AppSettings, Theme, NavPage, LogEntry } from '../types'
 
+// Terminal split layouts. '1' = single pane (classic). '2v' = side by side,
+// '2h' = stacked, '2x2' = four-up grid. Only the "normal" terminal strip splits;
+// the script-broadcast strip stays single.
+export type PaneLayout = '1' | '2v' | '2h' | '2x2'
+export const PANE_SLOTS: Record<PaneLayout, number> = { '1': 1, '2v': 2, '2h': 2, '2x2': 4 }
+
 interface AppState {
   servers: Server[]
   groups: Group[]
@@ -10,6 +16,10 @@ interface AppState {
   settings: AppSettings
   tabs: Tab[]
   activeTabId: string | null
+  /** Terminal split layout for the normal strip. */
+  paneLayout: PaneLayout
+  /** Tab ids occupying the grid slots (in order). activeTabId is the focused one. */
+  panes: string[]
   theme: Theme
   activePage: NavPage
   rightPanel: null | { mode: 'new'; groupId?: string } | { mode: 'edit'; server: Server }
@@ -36,6 +46,9 @@ interface AppState {
   updateTab: (id: string, u: Partial<Tab>) => void
   removeTab: (id: string) => void
   setActiveTab: (id: string | null) => void
+  setPaneLayout: (l: PaneLayout) => void
+  /** Focus a tab; in split mode, drop it into the focused slot if not shown yet. */
+  activateTab: (id: string) => void
 
   upsertServer: (s: Server) => void
   removeServer: (id: string) => void
@@ -82,6 +95,8 @@ export const useAppStore = create<AppState>((set) => ({
   settings: defaultSettings,
   tabs: [],
   activeTabId: null,
+  paneLayout: '1',
+  panes: [],
   theme: 'dark',
   activePage: 'hosts',
   rightPanel: null,
@@ -101,16 +116,55 @@ export const useAppStore = create<AppState>((set) => ({
   setActivePage: (activePage) => set({ activePage }),
   setRightPanel: (rightPanel) => set({ rightPanel }),
 
-  addTab: (tab) => set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id })),
+  addTab: (tab) =>
+    set((s) => {
+      const tabs = [...s.tabs, tab]
+      if (s.paneLayout === '1') return { tabs, activeTabId: tab.id }
+      // Split: fill the next empty slot, else replace the focused one.
+      const count = PANE_SLOTS[s.paneLayout]
+      const panes = s.panes.slice()
+      if (panes.length < count) panes.push(tab.id)
+      else panes[Math.max(0, panes.indexOf(s.activeTabId ?? ''))] = tab.id
+      return { tabs, activeTabId: tab.id, panes }
+    }),
   updateTab: (id, u) => set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...u } : t)) })),
   removeTab: (id) =>
     set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id)
+      const panes = s.panes.filter((p) => p !== id)
+      // Collapse back to single when the grid empties out.
+      const paneLayout: PaneLayout = panes.length === 0 ? '1' : s.paneLayout
       const activeTabId =
-        s.activeTabId === id ? (tabs.length > 0 ? tabs[tabs.length - 1].id : null) : s.activeTabId
-      return { tabs, activeTabId }
+        s.activeTabId === id
+          ? (panes[panes.length - 1] ?? (tabs.length > 0 ? tabs[tabs.length - 1].id : null))
+          : s.activeTabId
+      return { tabs, panes, paneLayout, activeTabId }
     }),
   setActiveTab: (id) => set({ activeTabId: id }),
+  setPaneLayout: (paneLayout) =>
+    set((s) => {
+      const count = PANE_SLOTS[paneLayout]
+      // Candidate tabs for the grid: normal-strip terminals, focused one first,
+      // then whatever was already shown, then the rest by tab order.
+      const normal = s.tabs.filter((t) => (t.kind ?? 'normal') === 'normal')
+      const order: string[] = []
+      const push = (id: string | null): void => {
+        if (id && !order.includes(id) && normal.some((t) => t.id === id)) order.push(id)
+      }
+      push(s.activeTabId)
+      s.panes.forEach(push)
+      normal.forEach((t) => push(t.id))
+      const panes = order.slice(0, count)
+      const activeTabId = panes.includes(s.activeTabId ?? '') ? s.activeTabId : (panes[0] ?? s.activeTabId)
+      return { paneLayout, panes, activeTabId }
+    }),
+  activateTab: (id) =>
+    set((s) => {
+      if (s.paneLayout === '1' || s.panes.includes(id)) return { activeTabId: id }
+      const panes = s.panes.slice()
+      panes[Math.max(0, panes.indexOf(s.activeTabId ?? ''))] = id
+      return { activeTabId: id, panes }
+    }),
 
   upsertServer: (server) =>
     set((s) => ({

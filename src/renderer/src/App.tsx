@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import type { CSSProperties } from 'react'
 import { useAppStore } from './store/appStore'
 import TitleBar from './components/Layout/TitleBar'
 import Sidebar from './components/Layout/Sidebar'
@@ -17,14 +18,28 @@ import TunnelsPanel from './components/Tunnels/TunnelsPanel'
 import SettingsPanel from './components/Dialogs/SettingsPanel'
 import UpdateNotification from './components/Layout/UpdateNotification'
 import type { Server, Tab, LogEntry } from './types'
+import type { PaneLayout } from './store/appStore'
 import { applyTheme, getThemeBase } from './themes'
+
+// Absolute rect (in %) for a grid slot. Each pane is positioned by hand so the
+// TerminalPane instances stay mounted across layout changes (no remount = no
+// lost shell). TerminalPane's own ResizeObserver refits when the rect changes.
+function slotRect(layout: PaneLayout, idx: number): CSSProperties {
+  if (layout === '1' || idx < 0) return { top: 0, left: 0, width: '100%', height: '100%' }
+  if (layout === '2v') return { top: 0, left: idx === 0 ? 0 : '50%', width: '50%', height: '100%' }
+  if (layout === '2h') return { top: idx === 0 ? 0 : '50%', left: 0, width: '100%', height: '50%' }
+  // 2x2
+  const col = idx % 2
+  const row = Math.floor(idx / 2)
+  return { top: row ? '50%' : 0, left: col ? '50%' : 0, width: '50%', height: '50%' }
+}
 
 export default function App() {
   const {
     setServers, setGroups, setKeys, setCredentials, setSnippets, setSettings,
     addTab, updateTab, removeTab, setActiveTab, setActivePage,
     upsertServer, theme, setTheme, addLog,
-    servers, tabs, activeTabId, activePage, rightPanel, settings
+    servers, tabs, activeTabId, paneLayout, panes, activePage, rightPanel, settings
   } = useAppStore()
 
   // Load data + apply theme
@@ -289,14 +304,31 @@ export default function App() {
                 style={{ display: inTerminalArea ? 'block' : 'none' }}
               >
                 {tabs.map((tab) => {
-                  const visible = tab.id === activeTabId && tabKind(tab) === pageKind
+                  const kindMatch = tabKind(tab) === pageKind
+                  // Which grid slot this tab occupies (-1 = not shown). In single
+                  // layout only the active tab is shown; in split, the panes array.
+                  const slotIdx = paneLayout === '1'
+                    ? (tab.id === activeTabId ? 0 : -1)
+                    : panes.indexOf(tab.id)
+                  const inGrid = kindMatch && slotIdx >= 0
+                  const visible = inGrid
+                  const focused = tab.id === activeTabId
+                  const split = paneLayout !== '1'
                   return (
                   <div
                     key={tab.id}
-                    className="absolute inset-0"
+                    className="absolute"
+                    onMouseDownCapture={() => { if (inGrid && !focused) setActiveTab(tab.id) }}
                     style={{
+                      ...slotRect(paneLayout, slotIdx),
                       visibility: visible ? 'visible' : 'hidden',
-                      pointerEvents: visible ? 'auto' : 'none'
+                      pointerEvents: visible ? 'auto' : 'none',
+                      ...(split && inGrid
+                        ? {
+                            outline: `${focused ? 2 : 1}px solid ${focused ? 'var(--accent)' : 'var(--border-subtle, var(--border))'}`,
+                            outlineOffset: '-1px'
+                          }
+                        : {})
                     }}
                   >
                     {tab.status === 'connecting' && <LoadingScreen name={tab.serverName} host={tab.serverHost} />}
@@ -318,7 +350,7 @@ export default function App() {
                         <div style={{ position: 'absolute', inset: 0, display: tab.mode === 'sftp' && tab.status === 'connected' ? 'none' : 'block' }}>
                           <TerminalPane
                             tab={tab}
-                            isActive={visible && !(tab.mode === 'sftp' && tab.status === 'connected')}
+                            isActive={focused && !(tab.mode === 'sftp' && tab.status === 'connected')}
                             isPageVisible={inTerminalArea && tabKind(tab) === pageKind}
                             autoReconnect={settings.autoReconnect !== false}
                             onAutoReconnect={() => reconnectInPlace(tab.id)}

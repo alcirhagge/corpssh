@@ -67,6 +67,10 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
   autoReconnectRef.current = autoReconnect
   const onAutoReconnectRef = useRef(onAutoReconnect)
   onAutoReconnectRef.current = onAutoReconnect
+  // Close is captured once by the key handler (built in a []-effect); keep it in a
+  // ref so Ctrl+Shift+W always closes the CURRENT tab, not the mount-time one.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
   // The terminal is created once and outlives reconnects; these refs let the
   // long-lived input/resize handlers always see the CURRENT session id and shell
@@ -170,6 +174,27 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
     // Paste: block \x16 from going to SSH — the paste DOM event handles the actual paste
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
+      // ── Split / close shortcuts. All use Ctrl+Shift+… on purpose: a bare
+      // Ctrl+W is readline's unix-word-rubout in the shell, so we never hijack it.
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'w' || e.key === 'W')) {
+        e.preventDefault(); onCloseRef.current(); return false
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault()
+        const st = useAppStore.getState(); st.setPaneLayout(st.paneLayout === '2v' ? '1' : '2v')
+        return false
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'e' || e.key === 'E')) {
+        e.preventDefault()
+        const st = useAppStore.getState(); st.setPaneLayout(st.paneLayout === '2h' ? '1' : '2h')
+        return false
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
+        e.preventDefault()
+        const st = useAppStore.getState()
+        st.setPaneLayout(st.paneLayout === '1' ? '2v' : st.paneLayout === '2v' ? '2x2' : '1')
+        return false
+      }
       // Ctrl/Cmd+F → toggle find bar (xterm would otherwise send ^F to the PTY)
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
