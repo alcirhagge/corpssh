@@ -26,26 +26,51 @@ function metaPath(sessionId: string): string {
   return path.join(SESSIONS_DIR, `${sessionId}.json`)
 }
 
-// ─── Headless terminal emulator per session ─────────────────────────────────
-// We feed the raw SSH byte stream into a real (headless) xterm. Instead of
-// dumping the stream verbatim — which linearises cursor-addressed output
-// (neofetch's two columns, progress bars redrawn with \r, top/htop frames) into
-// garbage — we periodically serialise the EMULATOR's rendered buffer to disk.
-// The on-disk log then matches exactly what the user saw on screen, already
-// clean of ANSI escapes and carriage-return redraws.
+// ─── Append-only transcript via a headless terminal emulator ────────────────
+// We feed the raw SSH byte stream into a real (headless) xterm so the on-disk
+// log shows what the user actually saw — clean of ANSI escapes and of the
+// carriage-return / cursor-addressing redraws that progress bars and live
+// monitors (mikrotik /interface monitor, watch, ping) spray. The emulator
+// collapses those redraws to the final rendered state.
+//
+// Unlike the old "re-serialise the whole buffer and OVERWRITE the file every
+// tick" approach, this commits finalised lines APPEND-ONLY:
+//   • Lines that scroll into the emulator's scrollback are final — they can no
+//     longer change — so we append them as they go (handles unbounded output
+//     without ever overwriting earlier history).
+//   • Before a destructive transition that would erase still-visible content
+//     (a hard clear `ESC[3J`/RIS, or entering the alternate screen), we flush
+//     the current viewport so it survives in the log.
+//   • Full-screen apps (btop, htop, vim, less) run in the ALTERNATE screen.
+//     Their frames are not transcribed (that would be unreadable churn); we
+//     record a single marker that the app ran, and keep the history on either
+//     side intact.
 interface Session {
   term: Terminal
-  header: string
+  // Number of MAIN-buffer scrollback lines already written to disk in the
+  // current epoch. Reset to 0 after a hard clear (new epoch).
+  committed: number
+  inAlt: boolean       // currently inside the alternate screen?
+  altSince: number     // timestamp the alt screen was entered (for the marker)
 }
 
 const SCROLLBACK = 10000
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 40
-const SNAPSHOT_INTERVAL = 1500
+const COMMIT_INTERVAL = 1500
+
+// Enter / leave the alternate screen buffer (xterm: 1049 = save+alt, 1047/47 = legacy).
+const ALT_ENTER = /\x1b\[\?(?:1049|1047|47)h/
+const ALT_LEAVE = /\x1b\[\?(?:1049|1047|47)l/
+// History-destroying clears in the MAIN buffer: ESC[3J wipes the scrollback,
+// ESC c (RIS) is a full reset. Plain ESC[2J only blanks the visible screen
+// (scrollback kept) and is left to the emulator — catching it would log one
+// frame per refresh for apps that clear-and-redraw in place.
+const HARD_CLEAR = /\x1b\[3J|\x1bc/
 
 const sessions = new Map<string, Session>()
 const dirty = new Set<string>()
-let snapshotTimer: NodeJS.Timeout | null = null
+let commitTimer: NodeJS.Timeout | null = null
 
 function buildHeader(meta: SessionMeta): string {
   return [
@@ -62,50 +87,71 @@ function buildHeader(meta: SessionMeta): string {
 
 export function createSessionLog(meta: SessionMeta): void {
   ensureDir()
-  const header = buildHeader(meta)
-  fs.writeFileSync(logPath(meta.sessionId), header, 'utf-8')
+  fs.writeFileSync(logPath(meta.sessionId), buildHeader(meta), 'utf-8')
   fs.writeFileSync(metaPath(meta.sessionId), JSON.stringify(meta, null, 2), 'utf-8')
 
   const term = new Terminal({
     cols: DEFAULT_COLS,
     rows: DEFAULT_ROWS,
     scrollback: SCROLLBACK,
-    allowProposedApi: true  // needed for buffer.active access
+    allowProposedApi: true // needed for buffer.active access
   })
-  sessions.set(meta.sessionId, { term, header })
+  sessions.set(meta.sessionId, { term, committed: 0, inAlt: false, altSince: 0 })
 }
 
-// Render the emulator's full buffer (scrollback + viewport) to clean plain text.
-function dumpBody(term: Terminal): string {
-  const buf = term.buffer.active
-  const lines: string[] = []
-  for (let i = 0; i < buf.length; i++) {
-    const line = buf.getLine(i)
-    lines.push(line ? line.translateToString(true).replace(/\s+$/, '') : '')
-  }
-  // Drop trailing blank lines so the log doesn't end with a wall of whitespace
-  while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
-  return lines.join('\n')
+function renderLine(term: Terminal, i: number): string {
+  const line = term.buffer.active.getLine(i)
+  return line ? line.translateToString(true).replace(/\s+$/, '') : ''
 }
 
-function snapshotToDisk(sessionId: string): void {
-  const s = sessions.get(sessionId)
-  if (!s) return
+// Append text to the on-disk log, never overwriting.
+function appendToDisk(sessionId: string, text: string): void {
+  if (!text) return
   try {
-    fs.writeFileSync(logPath(sessionId), s.header + dumpBody(s.term) + '\n', 'utf-8')
+    fs.appendFileSync(logPath(sessionId), text, 'utf-8')
   } catch { /* ignore log write failures */ }
 }
 
-function scheduleSnapshot(): void {
-  if (snapshotTimer) return
-  snapshotTimer = setTimeout(() => {
-    snapshotTimer = null
-    for (const id of dirty) snapshotToDisk(id)
-    dirty.clear()
-  }, SNAPSHOT_INTERVAL)
+// Commit MAIN-buffer lines that have scrolled into the scrollback (and are thus
+// final) since the last commit. No-op while in the alternate screen.
+function commitScrollback(s: Session, sessionId: string): void {
+  if (s.inAlt || s.term.buffer.active.type !== 'normal') return
+  const baseY = s.term.buffer.active.baseY
+  if (baseY <= s.committed) return
+  const lines: string[] = []
+  for (let i = s.committed; i < baseY; i++) lines.push(renderLine(s.term, i))
+  s.committed = baseY
+  appendToDisk(sessionId, lines.join('\n') + '\n')
 }
 
-// Wait for the emulator's write queue to drain, then run fn with a current buffer.
+// Flush the still-visible viewport (everything from the top of the screen down
+// to the cursor row). Called before content that would otherwise be erased —
+// a hard clear or entering the alternate screen — and at session end.
+function flushViewport(s: Session, sessionId: string): void {
+  if (s.term.buffer.active.type !== 'normal') return
+  commitScrollback(s, sessionId)
+  const buf = s.term.buffer.active
+  const top = buf.baseY
+  const last = top + buf.cursorY // inclusive: the cursor's own row
+  const lines: string[] = []
+  for (let i = top; i <= last; i++) lines.push(renderLine(s.term, i))
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
+  if (lines.length) appendToDisk(sessionId, lines.join('\n') + '\n')
+}
+
+function scheduleCommit(): void {
+  if (commitTimer) return
+  commitTimer = setTimeout(() => {
+    commitTimer = null
+    for (const id of dirty) {
+      const s = sessions.get(id)
+      if (s) commitScrollback(s, id)
+    }
+    dirty.clear()
+  }, COMMIT_INTERVAL)
+}
+
+// Wait for the emulator's write queue to drain, then run fn.
 function whenDrained(term: Terminal, fn: () => void): void {
   term.write('', fn)
 }
@@ -113,15 +159,44 @@ function whenDrained(term: Terminal, fn: () => void): void {
 export function appendSessionData(sessionId: string, data: string): void {
   const s = sessions.get(sessionId)
   if (!s) return
-  s.term.write(data)
+
+  const entersAlt = !s.inAlt && ALT_ENTER.test(data)
+  const leavesAlt = s.inAlt && ALT_LEAVE.test(data)
+  const hardClear = !s.inAlt && HARD_CLEAR.test(data)
+
+  // Preserve content that's about to be destroyed: read the CURRENT (pre-write)
+  // buffer and flush the live viewport before the emulator processes the data.
+  if (entersAlt || hardClear) {
+    whenDrained(s.term, () => flushViewport(s, sessionId))
+  }
+  if (entersAlt) {
+    s.inAlt = true
+    s.altSince = Date.now()
+  }
+
+  s.term.write(data, () => {
+    if (hardClear) {
+      // New epoch: the scrollback was wiped, so the line counter restarts.
+      s.committed = s.term.buffer.active.baseY
+    }
+    if (leavesAlt) {
+      s.inAlt = false
+      const secs = s.altSince ? Math.round((Date.now() - s.altSince) / 1000) : 0
+      const dur = secs >= 60 ? `${Math.floor(secs / 60)}m${secs % 60}s` : `${secs}s`
+      appendToDisk(sessionId, `[full-screen app — ${dur}]\n`)
+      // The main buffer is restored to its pre-alt state; resync the counter so
+      // we don't re-commit lines that were already on screen before the app ran.
+      s.committed = s.term.buffer.active.baseY
+    }
+  })
+
   dirty.add(sessionId)
-  scheduleSnapshot()
+  scheduleCommit()
 }
 
 // Commands are already echoed by the remote shell and captured by the emulator,
-// so we no longer inject synthetic "CMD>" markers — they would duplicate the
-// echoed input and break cursor-addressed redraws. Kept as a no-op so the
-// caller (sshManager) needs no change.
+// so we don't inject synthetic "CMD>" markers — they would duplicate the echoed
+// input. Kept as a no-op so the caller (sshManager) needs no change.
 export function appendSessionCommand(_sessionId: string, _command: string): void {
   /* intentionally empty — see comment above */
 }
@@ -134,8 +209,10 @@ export function resizeSession(sessionId: string, cols: number, rows: number): vo
 }
 
 export function flushSession(sessionId: string): void {
+  const s = sessions.get(sessionId)
+  if (!s) return
   dirty.delete(sessionId)
-  snapshotToDisk(sessionId)
+  whenDrained(s.term, () => commitScrollback(s, sessionId))
 }
 
 export function closeSessionLog(sessionId: string, endedAt: number): void {
@@ -143,9 +220,7 @@ export function closeSessionLog(sessionId: string, endedAt: number): void {
 
   const finalize = (): void => {
     const footer = `\n${'='.repeat(40)}\nSession ended: ${new Date(endedAt).toISOString()}\n`
-    try {
-      if (fs.existsSync(logPath(sessionId))) fs.appendFileSync(logPath(sessionId), footer, 'utf-8')
-    } catch { /* ignore */ }
+    appendToDisk(sessionId, footer)
     if (s) { s.term.dispose(); sessions.delete(sessionId) }
     dirty.delete(sessionId)
   }
@@ -160,7 +235,13 @@ export function closeSessionLog(sessionId: string, endedAt: number): void {
   } catch { /* ignore */ }
 
   if (s) {
-    whenDrained(s.term, () => { snapshotToDisk(sessionId); finalize() })
+    // Drain, commit scrolled-off lines, then flush whatever is still on screen.
+    whenDrained(s.term, () => {
+      if (s.inAlt) { s.inAlt = false } // never leaked the marker; just stop
+      commitScrollback(s, sessionId)
+      flushViewport(s, sessionId)
+      finalize()
+    })
   } else {
     finalize()
   }
@@ -178,15 +259,30 @@ export function listSessions(): SessionMeta[] {
     .sort((a, b) => (b!.startedAt ?? 0) - (a!.startedAt ?? 0)) as SessionMeta[]
 }
 
+// Build the not-yet-committed tail (scrolled-off lines past `committed` plus the
+// live viewport) so a live read shows the full session without mutating disk.
+function pendingTail(s: Session): string {
+  if (s.inAlt || s.term.buffer.active.type !== 'normal') return ''
+  const buf = s.term.buffer.active
+  const last = buf.baseY + buf.cursorY
+  const lines: string[] = []
+  for (let i = s.committed; i <= last; i++) lines.push(renderLine(s.term, i))
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop()
+  return lines.length ? lines.join('\n') + '\n' : ''
+}
+
 // Async so we can drain the emulator's pending writes before reading a live session.
 export function readSessionLog(sessionId: string): Promise<string> {
   return new Promise((resolve) => {
     const s = sessions.get(sessionId)
     if (s) {
       whenDrained(s.term, () => {
-        snapshotToDisk(sessionId)
+        commitScrollback(s, sessionId)
         dirty.delete(sessionId)
-        resolve(s.header + dumpBody(s.term) + '\n')
+        let onDisk = ''
+        try { onDisk = fs.existsSync(logPath(sessionId)) ? fs.readFileSync(logPath(sessionId), 'utf-8') : '' }
+        catch { onDisk = '' }
+        resolve(onDisk + pendingTail(s))
       })
       return
     }
@@ -207,8 +303,8 @@ export function deleteSession(sessionId: string): void {
 }
 
 // Called on app startup: marks any session without endedAt as closed.
-// Sessions left open happen when the app crashes or is force-closed; the last
-// periodic snapshot (≤ SNAPSHOT_INTERVAL old) is preserved on disk.
+// Sessions left open happen when the app crashes or is force-closed; the
+// append-only log already holds everything committed up to the crash.
 export function cleanupOrphanedSessions(): void {
   try {
     ensureDir()
