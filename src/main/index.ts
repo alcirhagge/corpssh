@@ -98,6 +98,14 @@ function createWindow(): void {
   // renderer is a static local bundle, so 'self' + inline styles is enough.
   if (!is.dev) {
     mainWindow.webContents.session.webRequest.onHeadersReceived((details, cb) => {
+      // The VNC viewer (vnc-viewer.html) is local trusted content with an inline
+      // <script> for the RFB connect logic. A strict `script-src 'self'` would
+      // block that inline script and kill the viewer in packaged builds. It loads
+      // only a local bundle and a loopback ws, so exempt it from the app CSP.
+      if (details.url.includes('vnc-viewer.html')) {
+        cb({ responseHeaders: details.responseHeaders })
+        return
+      }
       cb({
         responseHeaders: {
           ...details.responseHeaders,
