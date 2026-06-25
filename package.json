@@ -16,6 +16,7 @@
   "build": {
     "appId": "com.corporate.ssh-client",
     "productName": "CorpSSH",
+    "npmRebuild": false,
     "directories": {
       "output": "dist"
     },
