@@ -1,11 +1,13 @@
-import { contextBridge, ipcRenderer, clipboard } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 
 const api = {
-  // Native clipboard — synchronous and instant (the async navigator.clipboard
-  // API is throttled/sanitized in Electron and adds a noticeable copy→paste lag).
+  // Native clipboard via the main process. The Electron `clipboard` module is
+  // unavailable in a sandboxed preload (sandbox:true), so we relay over IPC.
+  // readText stays synchronous (sendSync) so paste-on-right-click is instant
+  // and the async navigator.clipboard throttling/lag is avoided.
   clipboard: {
-    readText: (): string => clipboard.readText(),
-    writeText: (text: string): void => clipboard.writeText(text)
+    readText: (): string => ipcRenderer.sendSync('clipboard:readText'),
+    writeText: (text: string): void => ipcRenderer.send('clipboard:writeText', text)
   },
 
   // Command snippets

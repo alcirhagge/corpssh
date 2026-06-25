@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, nativeImage } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, nativeImage, clipboard } from 'electron'
 import { join, resolve } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
@@ -177,6 +177,17 @@ app.whenReady().then(() => {
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+  })
+
+  // Native clipboard via main process. The Electron `clipboard` module is NOT
+  // available in a sandboxed preload (sandbox:true), so the renderer routes
+  // through here. readText is synchronous (sendSync) to keep the paste-on-
+  // right-click path a single uninterrupted gesture.
+  ipcMain.on('clipboard:readText', (e) => {
+    e.returnValue = clipboard.readText()
+  })
+  ipcMain.on('clipboard:writeText', (_e, text: string) => {
+    clipboard.writeText(text)
   })
 
   ipcMain.handle('window:minimize', () => mainWindow?.minimize())
