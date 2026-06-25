@@ -770,9 +770,10 @@ function TabItem({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
+      onDoubleClick={onClose}
       onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose() } }}
       onContextMenu={onContextMenu}
-      title="Click: activate · Middle-click or ✕: close · Right-click: options"
+      title="Click: activate · Double-click / middle-click / ✕: close · Right-click: options"
     >
       {isActive && (
         <div

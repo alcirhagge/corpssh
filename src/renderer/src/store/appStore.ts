@@ -49,6 +49,8 @@ interface AppState {
   setPaneLayout: (l: PaneLayout) => void
   /** Focus a tab; in split mode, drop it into the focused slot if not shown yet. */
   activateTab: (id: string) => void
+  /** Swap two grid slots (Alt+drag rearrange). */
+  swapPanes: (i: number, j: number) => void
 
   upsertServer: (s: Server) => void
   removeServer: (id: string) => void
@@ -164,6 +166,16 @@ export const useAppStore = create<AppState>((set) => ({
       const panes = s.panes.slice()
       panes[Math.max(0, panes.indexOf(s.activeTabId ?? ''))] = id
       return { activeTabId: id, panes }
+    }),
+  swapPanes: (i, j) =>
+    set((s) => {
+      if (i === j) return {}
+      const panes = s.panes.slice()
+      const tmp = panes[i]
+      panes[i] = panes[j]
+      panes[j] = tmp
+      // Moving into an empty slot leaves a hole — compact it away.
+      return { panes: panes.filter((p) => p != null) }
     }),
 
   upsertServer: (server) =>
