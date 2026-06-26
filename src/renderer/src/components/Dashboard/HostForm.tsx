@@ -15,6 +15,14 @@ function getIconColor(server: Partial<Server>): string {
   return HOST_ICON_COLORS[idx]
 }
 
+// Resolve the auth method to persist. An explicit choice (incl. 'agent') wins;
+// otherwise fall back to the legacy heuristic of "key path present => privateKey".
+function deriveAuthMethod(form: Partial<Server>): 'password' | 'privateKey' | 'agent' {
+  if (form.authMethod === 'agent') return 'agent'
+  if (form.authMethod === 'privateKey') return 'privateKey'
+  return form.privateKeyPath?.trim() ? 'privateKey' : 'password'
+}
+
 export default function HostForm({ onConnect }: { onConnect: (server: Server) => void }) {
   const { rightPanel, setRightPanel, groups, credentials, servers, upsertServer } = useAppStore()
   const isEdit = rightPanel?.mode === 'edit'
@@ -28,7 +36,6 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
   })
   const [showPw, setShowPw] = useState(false)
   const [showPassphrase, setShowPassphrase] = useState(false)
-  const [showKeySection, setShowKeySection] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [portFocused, setPortFocused] = useState(false)
@@ -43,11 +50,9 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
     isDirty.current = false
     serverIdRef.current = editServer?.id
     if (editServer) {
-      setForm({ ...editServer })
-      setShowKeySection(editServer.authMethod === 'privateKey' || !!editServer.privateKeyPath)
+      setForm({ ...editServer, authMethod: editServer.authMethod ?? (editServer.privateKeyPath ? 'privateKey' : 'password') })
     } else {
       setForm({ name: '', host: '', port: 22, username: '', protocol: 'ssh', authMethod: 'password', password: '', groupId: defaultGroupId })
-      setShowKeySection(false)
     }
     setError('')
   }, [rightPanel])
@@ -63,7 +68,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       try {
-        const derivedAuthMethod = form.privateKeyPath?.trim() ? 'privateKey' : 'password'
+        const derivedAuthMethod = deriveAuthMethod(form)
         const toSave = { ...form, id: serverIdRef.current, name: form.name?.trim() || form.host!, authMethod: derivedAuthMethod, port: form.port || defaultPort(form.protocol ?? 'ssh') }
         const saved = await window.api.servers.save(toSave as Server)
         upsertServer(saved)
@@ -99,7 +104,7 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
     if (err) { setError(err); return }
     setSaving(true)
     try {
-      const derivedAuthMethod = form.privateKeyPath?.trim() ? 'privateKey' : 'password'
+      const derivedAuthMethod = deriveAuthMethod(form)
       const toSave = { ...form, id: serverIdRef.current, name: form.name?.trim() || form.host!, authMethod: derivedAuthMethod }
       const saved = await window.api.servers.save(toSave as Server)
       upsertServer(saved)
@@ -332,41 +337,45 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
               placeholder="Username"
               className="mb-2"
             />
-            <div className="relative mb-2">
-              <input
-                type={showPw ? 'text' : 'password'}
-                value={form.password ?? ''}
-                onChange={(e) => set('password', e.target.value)}
-                placeholder="Password"
-                style={{ paddingRight: 32 }}
-              />
-              <button onClick={() => setShowPw((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2"
-                style={{ color: 'var(--text-muted)', background: 'none' }}>
-                {showPw ? <EyeOff size={12} /> : <Eye size={12} />}
-              </button>
+            {/* Auth method: password / private key / SSH agent (Bitwarden, ssh-agent…) */}
+            <div className="flex gap-1 mb-2">
+              {(['password', 'privateKey', 'agent'] as const).map((method) => {
+                const active = (form.authMethod ?? 'password') === method
+                return (
+                  <button
+                    key={method}
+                    onClick={() => set('authMethod', method)}
+                    className="flex-1 py-1.5 rounded-md text-xs font-medium"
+                    style={{
+                      background: active ? 'var(--accent)' : 'var(--bg-elevated)',
+                      color: active ? '#fff' : 'var(--text-secondary)',
+                      border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`
+                    }}
+                  >
+                    {method === 'password' ? 'Senha' : method === 'privateKey' ? 'Chave SSH' : 'Agente'}
+                  </button>
+                )
+              })}
             </div>
 
-            {/* SSH key toggle */}
-            <button
-              onClick={() => setShowKeySection((v) => !v)}
-              className="flex items-center gap-1.5 text-xs mb-2"
-              style={{ color: 'var(--text-secondary)', background: 'none', padding: 0, cursor: 'pointer' }}
-            >
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 16, height: 16, borderRadius: 4, fontSize: 14, lineHeight: 1,
-                background: showKeySection ? 'var(--accent)' : 'var(--bg-elevated)',
-                color: showKeySection ? '#fff' : 'var(--text-secondary)',
-                border: `1px solid ${showKeySection ? 'var(--accent)' : 'var(--border)'}`,
-                flexShrink: 0
-              }}>
-                {showKeySection ? '−' : '+'}
-              </span>
-              SSH Key
-            </button>
+            {(form.authMethod ?? 'password') === 'password' && (
+              <div className="relative mb-1">
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  value={form.password ?? ''}
+                  onChange={(e) => set('password', e.target.value)}
+                  placeholder="Password"
+                  style={{ paddingRight: 32 }}
+                />
+                <button onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2"
+                  style={{ color: 'var(--text-muted)', background: 'none' }}>
+                  {showPw ? <EyeOff size={12} /> : <Eye size={12} />}
+                </button>
+              </div>
+            )}
 
-            {showKeySection && (
+            {form.authMethod === 'privateKey' && (
               <div className="pl-2" style={{ borderLeft: '2px solid var(--accent-subtle)' }}>
                 <div className="flex gap-1.5 mb-2">
                   <input
@@ -397,6 +406,15 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
                     {showPassphrase ? <EyeOff size={12} /> : <Eye size={12} />}
                   </button>
                 </div>
+              </div>
+            )}
+
+            {form.authMethod === 'agent' && (
+              <div
+                className="px-3 py-2 rounded text-xs"
+                style={{ background: 'var(--accent-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)', lineHeight: 1.4 }}
+              >
+                Usando o agente SSH do sistema (<code>SSH_AUTH_SOCK</code>) — ex: Bitwarden, ssh-agent. A chave fica no agente; o CorpSSH não a guarda.
               </div>
             )}
             </>
