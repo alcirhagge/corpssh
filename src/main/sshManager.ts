@@ -149,6 +149,16 @@ const SSH_ALGORITHMS: NonNullable<ConnectConfig['algorithms']> = {
   hmac: ['hmac-sha2-256', 'hmac-sha2-512', 'hmac-sha1', 'hmac-md5']
 }
 
+// Resolve the ssh-agent endpoint. On Linux/macOS the agent (e.g. Bitwarden)
+// exports SSH_AUTH_SOCK. On Windows there is no socket env var — agents listen
+// on the OpenSSH named pipe instead, which ssh2 accepts as the `agent` value.
+// Bitwarden's Windows SSH agent emulates exactly this pipe.
+function resolveAgentSock(): string | undefined {
+  if (process.env.SSH_AUTH_SOCK) return process.env.SSH_AUTH_SOCK
+  if (process.platform === 'win32') return '\\\\.\\pipe\\openssh-ssh-agent'
+  return undefined
+}
+
 // Fill in the auth fields of a ConnectConfig from a connection config. Shared so
 // jump hops authenticate exactly like the final target. Throws on unreadable key.
 function applyAuth(config: SSHConnectionConfig, cc: ConnectConfig): void {
@@ -162,7 +172,7 @@ function applyAuth(config: SSHConnectionConfig, cc: ConnectConfig): void {
     }
     if (config.passphrase) cc.passphrase = config.passphrase
   } else if (config.authMethod === 'agent') {
-    cc.agent = process.env.SSH_AUTH_SOCK || undefined
+    cc.agent = resolveAgentSock()
   }
 }
 
@@ -323,7 +333,7 @@ export async function createSSHConnection(
       }
       if (config.passphrase) connectConfig.passphrase = config.passphrase
     } else if (config.authMethod === 'agent') {
-      connectConfig.agent = process.env.SSH_AUTH_SOCK || undefined
+      connectConfig.agent = resolveAgentSock()
     }
 
     client.on('keyboard-interactive', (_name, _instructions, _lang, prompts, finish) => {
@@ -449,6 +459,30 @@ export function disconnectSSH(sessionId: string): void {
   cmdBuffers.delete(sessionId)
   // GC the suppression flag after both close events have fired.
   setTimeout(() => intentionalClose.delete(sessionId), 3000)
+}
+
+// Gracefully end EVERY live SSH session. Called on app quit so we send a real
+// SSH disconnect (client.end) to each host instead of relying on the OS to tear
+// down the TCP sockets at process exit. Legacy gear (Huawei VRP, MikroTik, OLTs)
+// with few VTY lines reaps a graceful disconnect immediately; an OS-level socket
+// drop can leave the line occupied until the device's own idle-timeout fires.
+export function disconnectAll(): void {
+  for (const conn of activeConnections.values()) {
+    try {
+      const s = conn as any
+      if (s.stream) s.stream.end()
+      conn.client.end()
+    } catch {
+      /* already gone */
+    }
+  }
+  activeConnections.clear()
+}
+
+// True while at least one SSH session is live. Lets the quit handler skip the
+// graceful-shutdown delay when there's nothing to close.
+export function hasActiveConnections(): boolean {
+  return activeConnections.size > 0
 }
 
 export function listSFTPDirectory(sessionId: string, remotePath: string): Promise<SFTPEntry[]> {

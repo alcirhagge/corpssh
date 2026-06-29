@@ -3,6 +3,7 @@ import { join, resolve } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import { setupIpcHandlers } from './ipcHandlers'
+import { disconnectAll, hasActiveConnections } from './sshManager'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -227,6 +228,19 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+// Gracefully close every live SSH session before exit. Without this, quit just
+// lets the OS drop the TCP sockets — legacy gear (few VTY lines) may keep the
+// line occupied until its own idle-timeout. We delay the real quit briefly so
+// the SSH disconnect packets actually flush to the wire.
+let isQuitting = false
+app.on('before-quit', (e) => {
+  if (isQuitting || !hasActiveConnections()) return
+  e.preventDefault()
+  isQuitting = true
+  disconnectAll()
+  setTimeout(() => app.quit(), 250)
 })
 
 export { mainWindow }
