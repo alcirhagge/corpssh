@@ -365,7 +365,9 @@ export function setupIpcHandlers(): void {
         jumpHost: buildJump(jumpSrv.jumpHostId, new Set([jumpSrv.id]))
       }
       viaSessionId = generateId()
-      await createSSHConnection(viaSessionId, sshConfig)
+      // Tunnel-only carrier for the VNC framebuffer — it never opens a shell, so
+      // mark it 'carrier' to exempt it from the shell orphan watchdog.
+      await createSSHConnection(viaSessionId, sshConfig, undefined, 'carrier')
     }
 
     const wsPort = await createVNCProxy(sessionId, config.host, config.port, viaSessionId)

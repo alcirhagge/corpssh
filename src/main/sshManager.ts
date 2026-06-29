@@ -49,12 +49,32 @@ export interface SFTPEntry {
   group: number
 }
 
+// 'shell'   — an interactive terminal; it MUST own a live shell channel, and the
+//             transport has no reason to outlive that channel.
+// 'carrier' — a tunnel-only connection (VNC viewer, forwards) that legitimately
+//             never opens a shell. Never reaped by the shell watchdog.
+type ConnectionPurpose = 'shell' | 'carrier'
+
 interface ActiveConnection {
   client: Client
   sessionId: string
   config: SSHConnectionConfig
   remoteIdent?: string
+  purpose: ConnectionPurpose
+  /** The live shell channel, once createShellSession attaches one. */
+  stream?: NodeJS.ReadWriteStream & { stderr: NodeJS.ReadableStream; setWindow: (r: number, c: number, h: number, w: number) => void }
+  /** True once a shell channel is attached; gates the orphan watchdog. */
+  shellAttached?: boolean
+  /** Reaps a 'shell' connection that connected but never received its channel. */
+  shellWatchdog?: NodeJS.Timeout
 }
+
+// A 'shell' connection that authenticates but never gets a shell channel attached
+// within this window is an orphan (renderer crashed, IPC lost, race). We tear the
+// whole transport down so it can't sit as a stranded `notty` login on the device.
+// Generous vs. the sub-second connect→open-shell round-trip, tight enough that a
+// truly orphaned login is reaped long before it matters.
+const SHELL_WATCHDOG_MS = 30000
 
 const activeConnections = new Map<string, ActiveConnection>()
 
@@ -238,7 +258,8 @@ async function openJumpTransport(
 export async function createSSHConnection(
   sessionId: string,
   config: SSHConnectionConfig,
-  onNaturalClose?: () => void
+  onNaturalClose?: () => void,
+  purpose: ConnectionPurpose = 'shell'
 ): Promise<void> {
   // Build the transport first. With a jumpHost we tunnel through one or more
   // bastions (ProxyJump); otherwise a plain NODELAY TCP socket. The bastion
@@ -342,7 +363,20 @@ export async function createSSHConnection(
 
     client.on('ready', () => {
       handshakeDone = true
-      activeConnections.set(sessionId, { client, sessionId, config, remoteIdent })
+      const conn: ActiveConnection = { client, sessionId, config, remoteIdent, purpose }
+      activeConnections.set(sessionId, conn)
+      // Orphan guard: a 'shell' connection that never gets its channel attached
+      // would otherwise linger as a stranded `notty` login. Reap it if no shell
+      // shows up. Carriers (VNC/forward) are exempt — they never open a shell.
+      if (purpose === 'shell') {
+        conn.shellWatchdog = setTimeout(() => {
+          if (!conn.shellAttached && activeConnections.get(sessionId) === conn) {
+            dbg(`[${config.host}] no shell attached within ${SHELL_WATCHDOG_MS}ms — reaping orphan ${sessionId}`)
+            try { client.end() } catch { /* already gone */ }
+          }
+        }, SHELL_WATCHDOG_MS)
+        if (typeof conn.shellWatchdog.unref === 'function') conn.shellWatchdog.unref()
+      }
       resolve()
     })
 
@@ -356,6 +390,8 @@ export async function createSSHConnection(
     })
 
     client.on('close', () => {
+      const c = activeConnections.get(sessionId)
+      if (c?.shellWatchdog) clearTimeout(c.shellWatchdog)
       activeConnections.delete(sessionId)
       endJumps()  // tear down any bastions this session tunneled through
       notifySessionClosed(sessionId)
@@ -375,7 +411,18 @@ export function createShellSession(sessionId: string, cols: number, rows: number
     conn.client.shell(
       { term: 'xterm-256color', cols, rows },
       (err, stream) => {
-        if (err) return reject(err)
+        if (err) {
+          // The shell channel failed to open. The transport is still up and
+          // authenticated — leaving it would strand a shell-less `notty` login.
+          // Tear the whole connection down before surfacing the error.
+          try { conn.client.end() } catch { /* already gone */ }
+          return reject(err)
+        }
+
+        // Shell is live: cancel the orphan watchdog and record attachment so the
+        // connection is no longer a reap candidate.
+        conn.shellAttached = true
+        if (conn.shellWatchdog) { clearTimeout(conn.shellWatchdog); conn.shellWatchdog = undefined }
 
         // Match the log emulator's geometry to the real terminal so line
         // wrapping in the saved log mirrors what the user sees on screen.
@@ -401,14 +448,29 @@ export function createShellSession(sessionId: string, cols: number, rows: number
         stream.on('data', (data: Buffer) => pushOut(data.toString()))
         stream.stderr.on('data', (data: Buffer) => pushOut(data.toString()))
 
+        // A channel-level error (e.g. peer reset mid-session) may fire without a
+        // clean 'close'. Tear the transport down so it can't strand a notty login.
+        stream.on('error', () => {
+          try { conn.client.end() } catch { /* already gone */ }
+        })
+
         stream.on('close', () => {
           if (outTimer) { clearTimeout(outTimer); flushOut() }
           cmdBuffers.delete(sessionId)
-          emitClosed(sessionId)
-          activeConnections.delete(sessionId)
+          // The shell channel is gone — the user exited, or (the real bug) the
+          // device's exec-timeout reaped the interactive session after idle.
+          // We must tear down the WHOLE SSH transport, not just the channel:
+          // transport-level keepalive (keepaliveInterval) keeps the now-purposeless
+          // login alive, so legacy gear (OLTs, Huawei VRP) strands it as a `notty`
+          // session occupying a VTY slot until the device's own SSH timeout fires.
+          // Reconnect after reconnect, those notty zombies pile up and exhaust the
+          // few VTY lines, locking everyone out. client.end() fires the client
+          // 'close' handler, which runs emitClosed + notifySessionClosed (tears down
+          // port forwards) + endJumps + activeConnections.delete — the full cleanup.
+          conn.client.end()
         })
 
-        ;(conn as any).stream = stream
+        conn.stream = stream as ActiveConnection['stream']
         resolve()
       }
     )
@@ -421,7 +483,7 @@ export function createShellSession(sessionId: string, cols: number, rows: number
 const cmdBuffers = new Map<string, string>()
 
 export function sendInput(sessionId: string, data: string): void {
-  const conn = activeConnections.get(sessionId) as any
+  const conn = activeConnections.get(sessionId)
   if (conn?.stream) conn.stream.write(data)
 
   let buf = cmdBuffers.get(sessionId) ?? ''
@@ -440,7 +502,7 @@ export function sendInput(sessionId: string, data: string): void {
 }
 
 export function resizeTerminal(sessionId: string, cols: number, rows: number): void {
-  const conn = activeConnections.get(sessionId) as any
+  const conn = activeConnections.get(sessionId)
   if (conn?.stream) conn.stream.setWindow(rows, cols, 0, 0)
   resizeSession(sessionId, cols, rows)  // keep log emulator geometry in sync
 }
@@ -450,8 +512,8 @@ export function disconnectSSH(sessionId: string): void {
   intentionalClose.add(sessionId)
   const conn = activeConnections.get(sessionId)
   if (conn) {
-    const s = conn as any
-    if (s.stream) s.stream.end()
+    if (conn.shellWatchdog) clearTimeout(conn.shellWatchdog)
+    if (conn.stream) conn.stream.end()
     conn.client.end()
     activeConnections.delete(sessionId)
   }
@@ -469,8 +531,8 @@ export function disconnectSSH(sessionId: string): void {
 export function disconnectAll(): void {
   for (const conn of activeConnections.values()) {
     try {
-      const s = conn as any
-      if (s.stream) s.stream.end()
+      if (conn.shellWatchdog) clearTimeout(conn.shellWatchdog)
+      if (conn.stream) conn.stream.end()
       conn.client.end()
     } catch {
       /* already gone */
