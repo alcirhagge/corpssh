@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { Plus, Search, ChevronDown, Grid, List, Terminal, Folder, FolderOpen, MoreHorizontal, Trash2, FolderPlus, Monitor } from 'lucide-react'
+import { Plus, Search, ChevronDown, ChevronUp, Grid, List, Terminal, Folder, FolderOpen, MoreHorizontal, Trash2, FolderPlus, Monitor, ArrowDownUp, Columns3, Check } from 'lucide-react'
 import {
   siUbuntu, siDebian, siCentos, siFedora, siRedhat,
   siArchlinux, siAlpinelinux, siOpensuse, siLinux,
@@ -238,6 +238,94 @@ function getInitials(name: string): string {
     .join('')
 }
 
+// ─── Sort preferences ─────────────────────────────────────────────────────────
+
+type SortField = 'manual' | 'name' | 'host' | 'user' | 'port' | 'protocol' | 'recent'
+type SortDir = 'asc' | 'desc'
+interface SortState { field: SortField; dir: SortDir }
+
+// Toolbar ↕ presets — header clicks can reach any field/dir combo too.
+const SORT_PRESETS: { label: string; field: SortField; dir: SortDir }[] = [
+  { label: 'Manual order', field: 'manual', dir: 'asc' },
+  { label: 'Name A → Z', field: 'name', dir: 'asc' },
+  { label: 'Name Z → A', field: 'name', dir: 'desc' },
+  { label: 'Host A → Z', field: 'host', dir: 'asc' },
+  { label: 'Host Z → A', field: 'host', dir: 'desc' },
+  { label: 'Recently used', field: 'recent', dir: 'desc' }
+]
+
+function loadSort(): SortState {
+  try {
+    const raw = localStorage.getItem('hostSort')
+    if (raw) {
+      const s = JSON.parse(raw) as SortState
+      if (s && s.field) return s
+    }
+  } catch { /* ignore */ }
+  return { field: 'manual', dir: 'asc' }
+}
+
+// 'auto' keeps the responsive auto-fill grid; a number forces a fixed column count.
+type GridCols = 'auto' | 2 | 3 | 4 | 5 | 6 | 7
+const COL_OPTIONS: GridCols[] = ['auto', 2, 3, 4, 5, 6, 7]
+
+// ─── List-view table columns (name is always shown; rest are toggleable) ───────
+
+type ColKey = 'host' | 'user' | 'port' | 'protocol' | 'lastConnected'
+
+interface ColDef { key: ColKey; label: string; width: string; field: SortField }
+
+const LIST_COLUMNS: ColDef[] = [
+  { key: 'host',          label: 'Host',      width: 'minmax(96px, 180px)', field: 'host' },
+  { key: 'user',          label: 'User',      width: 'minmax(64px, 130px)', field: 'user' },
+  { key: 'port',          label: 'Port',      width: '52px',                field: 'port' },
+  { key: 'protocol',      label: 'Proto',     width: '56px',                field: 'protocol' },
+  { key: 'lastConnected', label: 'Last used', width: 'minmax(84px, 120px)', field: 'recent' }
+]
+
+const DEFAULT_COLS: ColKey[] = ['host', 'user', 'port']
+
+function loadListCols(): Set<ColKey> {
+  try {
+    const raw = localStorage.getItem('hostListCols')
+    if (raw) return new Set(JSON.parse(raw) as ColKey[])
+  } catch { /* ignore */ }
+  return new Set(DEFAULT_COLS)
+}
+
+// Natural compare so "OLT 3008" sorts before "OLT 3016" instead of lexicographically.
+const naturalCompare = (a: string, b: string): number =>
+  a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+
+function sortServers(list: ServerType[], sort: SortState): ServerType[] {
+  if (sort.field === 'manual') return list
+  const arr = [...list]
+  const sign = sort.dir === 'desc' ? -1 : 1
+  const cmp = (a: ServerType, b: ServerType): number => {
+    switch (sort.field) {
+      case 'name':     return naturalCompare(a.name, b.name)
+      case 'host':     return naturalCompare(a.host, b.host)
+      case 'user':     return naturalCompare(a.username, b.username)
+      case 'protocol': return naturalCompare(a.protocol ?? 'ssh', b.protocol ?? 'ssh')
+      case 'port':     return a.port - b.port
+      case 'recent':   return (a.lastConnected ?? 0) - (b.lastConnected ?? 0)
+      default:         return 0
+    }
+  }
+  return arr.sort((a, b) => sign * cmp(a, b))
+}
+
+function formatLastUsed(ms?: number): string {
+  if (!ms) return '—'
+  const d = Date.now() - ms
+  const min = 60_000, hr = 3_600_000, day = 86_400_000
+  if (d < min) return 'just now'
+  if (d < hr)  return `${Math.floor(d / min)}m ago`
+  if (d < day) return `${Math.floor(d / hr)}h ago`
+  if (d < day * 30) return `${Math.floor(d / day)}d ago`
+  return new Date(ms).toLocaleDateString()
+}
+
 export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboardProps) {
   const { servers, groups, setGroups, setRightPanel, upsertGroup, removeServer, removeGroup } = useAppStore()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -253,6 +341,22 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(
     () => (localStorage.getItem('hostViewMode') as 'grid' | 'list') ?? 'grid'
   )
+  const [sort, setSort] = useState<SortState>(loadSort)
+  const [gridCols, setGridCols] = useState<GridCols>(() => {
+    const raw = localStorage.getItem('hostGridCols')
+    if (raw && raw !== 'auto') {
+      const n = Number(raw)
+      if (n >= 2 && n <= 7) return n as GridCols
+    }
+    return 'auto'
+  })
+  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(loadListCols)
+  const [listColCount, setListColCount] = useState<number>(() => {
+    const n = Number(localStorage.getItem('hostListColCount'))
+    return n >= 1 && n <= 3 ? n : 1
+  })
+  const [sortMenuOpen, setSortMenuOpen] = useState(false)
+  const [colMenuOpen, setColMenuOpen] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(loadCollapsed)
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null)
   const [serverMenuId, setServerMenuId] = useState<string | null>(null)
@@ -279,8 +383,50 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
       const key = s.groupId && map.has(s.groupId) ? s.groupId : '__none__'
       map.get(key)!.push(s)
     })
+    if (sort.field !== 'manual') {
+      for (const [key, list] of map) map.set(key, sortServers(list, sort))
+    }
     return map
-  }, [filtered, groups])
+  }, [filtered, groups, sort])
+
+  // Group order follows the sort too: alphabetical for name/host modes, recency
+  // for 'recent' (group ranked by its most recently used host). Manual keeps the
+  // drag order.
+  const sortedGroups = useMemo(() => {
+    const dir = sort.dir === 'desc' ? -1 : 1
+    if (sort.field === 'name' || sort.field === 'host')
+      return [...groups].sort((a, b) => dir * naturalCompare(a.name, b.name))
+    if (sort.field === 'recent') {
+      const recencyOf = (id: string) =>
+        (byGroup.get(id) ?? []).reduce((max, s) => Math.max(max, s.lastConnected ?? 0), 0)
+      return [...groups].sort((a, b) => recencyOf(b.id) - recencyOf(a.id))
+    }
+    return groups
+  }, [groups, sort, byGroup])
+
+  // Visible list columns + a shared grid template so the header and every row
+  // (across all groups) line up into one table.
+  const listColumns = useMemo(() => LIST_COLUMNS.filter((c) => visibleCols.has(c.key)), [visibleCols])
+  const listTemplate = useMemo(
+    () => ['32px', 'minmax(120px, 240px)', ...listColumns.map((c) => c.width), '1fr', 'minmax(32px, auto)'].join(' '),
+    [listColumns]
+  )
+
+  const applySort = (next: SortState) => { setSort(next); localStorage.setItem('hostSort', JSON.stringify(next)) }
+
+  // Header click: same field flips direction, new field starts asc (recent: desc).
+  const handleHeaderSort = (field: SortField) => {
+    if (sort.field === field) applySort({ field, dir: sort.dir === 'asc' ? 'desc' : 'asc' })
+    else applySort({ field, dir: field === 'recent' ? 'desc' : 'asc' })
+  }
+
+  const toggleCol = (key: ColKey) =>
+    setVisibleCols((prev) => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      localStorage.setItem('hostListCols', JSON.stringify([...next]))
+      return next
+    })
 
   const toggleGroup = (id: string) =>
     setCollapsedGroups((prev) => {
@@ -364,12 +510,12 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
     <div
       className="flex flex-col flex-1 overflow-hidden"
       style={{ background: 'var(--bg-app)' }}
-      onClick={() => { setGroupMenuId(null); setServerMenuId(null) }}
+      onClick={() => { setGroupMenuId(null); setServerMenuId(null); setSortMenuOpen(false); setColMenuOpen(false) }}
     >
       {/* Toolbar */}
       <div
         className="flex items-center gap-2 px-4 py-3 flex-shrink-0 cs-glass"
-        style={{ borderBottom: '1px solid var(--glass-border)', background: 'var(--bg-surface)' }}
+        style={{ borderBottom: '1px solid var(--glass-border)', background: 'var(--bg-surface)', position: 'relative', zIndex: 40 }}
       >
         {/* Search */}
         <div className="relative flex-1">
@@ -424,6 +570,126 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
 
         <div style={{ width: 1, height: 22, background: 'var(--border)' }} />
 
+        {/* Sort */}
+        <div className="relative">
+          <button
+            onClick={(e) => { e.stopPropagation(); setColMenuOpen(false); setSortMenuOpen((o) => !o) }}
+            className="flex items-center justify-center w-9 h-9 rounded"
+            style={{
+              background: sort.field !== 'manual' || sortMenuOpen ? 'var(--bg-active)' : 'transparent',
+              color: sort.field !== 'manual' ? 'var(--text-primary)' : 'var(--text-muted)'
+            }}
+            title="Sort hosts"
+          >
+            <ArrowDownUp size={15} />
+          </button>
+          {sortMenuOpen && (
+            <DropMenu
+              onClose={() => setSortMenuOpen(false)}
+              items={SORT_PRESETS.map((p) => {
+                const active = sort.field === p.field && (p.field === 'manual' || sort.dir === p.dir)
+                return {
+                  label: (active ? '✓ ' : '  ') + p.label,
+                  onClick: () => applySort({ field: p.field, dir: p.dir })
+                }
+              })}
+            />
+          )}
+        </div>
+
+        {/* Column picker (list only) */}
+        {viewMode === 'list' && (
+          <div className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); setSortMenuOpen(false); setColMenuOpen((o) => !o) }}
+              className="flex items-center justify-center w-9 h-9 rounded"
+              style={{ background: colMenuOpen ? 'var(--bg-active)' : 'transparent', color: 'var(--text-muted)' }}
+              title="Choose columns"
+            >
+              <Columns3 size={15} />
+            </button>
+            {colMenuOpen && (
+              <div
+                className="absolute top-7 right-0 z-50 rounded-lg py-1 animate-fade-in"
+                style={{ background: 'var(--bg-menu)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', minWidth: 170 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-3 py-1.5 font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+                  Columns
+                </div>
+                {LIST_COLUMNS.map((c) => {
+                  const on = visibleCols.has(c.key)
+                  return (
+                    <button
+                      key={c.key}
+                      onClick={() => toggleCol(c.key)}
+                      className="flex items-center gap-2 w-full px-3 py-1.5 text-xs"
+                      style={{ color: 'var(--text-primary)', background: 'transparent' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <span className="flex items-center justify-center" style={{ width: 14, height: 14, borderRadius: 3, border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`, background: on ? 'var(--accent)' : 'transparent' }}>
+                        {on && <Check size={11} color="#fff" />}
+                      </span>
+                      {c.label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* List column count (list only) */}
+        {viewMode === 'list' && (
+          <div
+            className="flex items-center rounded"
+            style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', padding: 2, gap: 2 }}
+          >
+            {[1, 2, 3].map((n) => (
+              <button
+                key={n}
+                onClick={() => { setListColCount(n); localStorage.setItem('hostListColCount', String(n)) }}
+                className="flex items-center justify-center rounded"
+                style={{
+                  minWidth: 26, height: 24, fontSize: 11, fontWeight: 600,
+                  background: listColCount === n ? 'var(--bg-active)' : 'transparent',
+                  color: listColCount === n ? 'var(--text-primary)' : 'var(--text-muted)'
+                }}
+                title={`${n} column${n > 1 ? 's' : ''}`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Column count (grid only) */}
+        {viewMode === 'grid' && (
+          <div
+            className="flex items-center rounded"
+            style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', padding: 2, gap: 2 }}
+          >
+            {COL_OPTIONS.map((c) => (
+              <button
+                key={String(c)}
+                onClick={() => { setGridCols(c); localStorage.setItem('hostGridCols', String(c)) }}
+                className="flex items-center justify-center rounded"
+                style={{
+                  minWidth: 26, height: 24, fontSize: 11, fontWeight: 600,
+                  background: gridCols === c ? 'var(--bg-active)' : 'transparent',
+                  color: gridCols === c ? 'var(--text-primary)' : 'var(--text-muted)'
+                }}
+                title={c === 'auto' ? 'Auto columns' : `${c} columns`}
+              >
+                {c === 'auto' ? 'Auto' : c}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div style={{ width: 1, height: 22, background: 'var(--border)' }} />
+
         {/* View toggle */}
         {(['grid', 'list'] as const).map((mode) => (
           <button
@@ -456,8 +722,18 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
           </div>
         ) : (
           <>
+            {/* Table header (list view, single column only) */}
+            {viewMode === 'list' && listColCount === 1 && (
+              <ListTableHeader
+                template={listTemplate}
+                columns={listColumns}
+                sort={sort}
+                onSort={handleHeaderSort}
+              />
+            )}
+
             {/* Groups */}
-            {groups.map((group) => {
+            {sortedGroups.map((group) => {
               const items = byGroup.get(group.id) ?? []
               if (items.length === 0 && search) return null
               const collapsed = collapsedGroups.has(group.id)
@@ -498,6 +774,10 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
                     <HostGrid
                       servers={items}
                       viewMode={viewMode}
+                      fixedCols={gridCols === 'auto' ? undefined : gridCols}
+                      template={listTemplate}
+                      columns={listColumns}
+                      listColCount={listColCount}
                       onConnect={onConnect}
                       onConnectSftp={onConnectSftp}
                       onEdit={(s) => setRightPanel({ mode: 'edit', server: s })}
@@ -522,6 +802,10 @@ export default function HostDashboard({ onConnect, onConnectSftp }: HostDashboar
                   <HostGrid
                     servers={items}
                     viewMode={viewMode}
+                    fixedCols={gridCols === 'auto' ? undefined : gridCols}
+                    template={listTemplate}
+                    columns={listColumns}
+                    listColCount={listColCount}
                     onConnect={onConnect}
                     onConnectSftp={onConnectSftp}
                     onEdit={(s) => setRightPanel({ mode: 'edit', server: s })}
@@ -648,7 +932,7 @@ function SectionLabel({ label, count }: { label: string; count: number }) {
   )
 }
 
-function HostGrid({ servers, viewMode, onConnect, onConnectSftp, onEdit, onDelete, menuOpenId, onMenuOpen, onMenuClose, gridCols }: {
+function HostGrid({ servers, viewMode, onConnect, onConnectSftp, onEdit, onDelete, menuOpenId, onMenuOpen, onMenuClose, fixedCols, template, columns, listColCount = 1 }: {
   servers: ServerType[]
   viewMode: 'grid' | 'list'
   onConnect: (s: ServerType) => void
@@ -658,11 +942,14 @@ function HostGrid({ servers, viewMode, onConnect, onConnectSftp, onEdit, onDelet
   menuOpenId: string | null
   onMenuOpen: (id: string, e: React.MouseEvent) => void
   onMenuClose: () => void
-  gridCols?: number
+  fixedCols?: number
+  template?: string
+  columns?: ColDef[]
+  listColCount?: number
 }) {
   if (viewMode === 'grid') {
-    const cols = gridCols !== undefined
-      ? `repeat(auto-fill, minmax(${gridCols}px, 1fr))`
+    const cols = fixedCols !== undefined
+      ? `repeat(${fixedCols}, minmax(0, 1fr))`
       : 'repeat(auto-fill, minmax(260px, 1fr))'
     return (
       <div className="grid gap-3" style={{ gridTemplateColumns: cols }}>
@@ -683,11 +970,16 @@ function HostGrid({ servers, viewMode, onConnect, onConnectSftp, onEdit, onDelet
     )
   }
   return (
-    <div className="flex flex-col gap-1">
+    <div
+      className="grid gap-1"
+      style={{ gridTemplateColumns: listColCount > 1 ? `repeat(${listColCount}, minmax(0, 1fr))` : '1fr' }}
+    >
       {servers.map((s) => (
         <HostRow
           key={s.id}
           server={s}
+          template={template ?? ''}
+          columns={columns ?? []}
           onConnect={() => onConnect(s)}
           onConnectSftp={() => onConnectSftp(s)}
           onEdit={() => onEdit(s)}
@@ -697,6 +989,49 @@ function HostGrid({ servers, viewMode, onConnect, onConnectSftp, onEdit, onDelet
           onMenuClose={onMenuClose}
         />
       ))}
+    </div>
+  )
+}
+
+// Sticky header row for the list table. Clicking a header sorts by that field.
+function ListTableHeader({ template, columns, sort, onSort }: {
+  template: string
+  columns: ColDef[]
+  sort: SortState
+  onSort: (field: SortField) => void
+}) {
+  const cell = (label: string, field: SortField, extra?: React.CSSProperties) => {
+    const active = sort.field === field
+    return (
+      <button
+        onClick={() => onSort(field)}
+        className="flex items-center gap-1 uppercase tracking-wider"
+        style={{
+          background: 'none', padding: '0 4px', minWidth: 0,
+          color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+          fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', ...extra
+        }}
+        title={`Sort by ${label}`}
+      >
+        <span className="truncate">{label}</span>
+        {active && (sort.dir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+      </button>
+    )
+  }
+  return (
+    <div
+      className="grid items-center cs-glass"
+      style={{
+        gridTemplateColumns: template, gap: 8, position: 'sticky', top: -16, zIndex: 20,
+        padding: '8px 12px', margin: '-4px 0 8px', borderRadius: 8,
+        background: 'var(--bg-surface)', borderBottom: '1px solid var(--glass-border)'
+      }}
+    >
+      <span />
+      {cell('Name', 'name')}
+      {columns.map((c) => cell(c.label, c.field, c.key === 'port' ? { justifyContent: 'flex-end' } : undefined))}
+      <span />
+      <span />
     </div>
   )
 }
@@ -825,12 +1160,12 @@ function HostCard({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen
   )
 }
 
-function HostRow({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen, onMenuOpen, onMenuClose }: {
-  server: ServerType; onConnect: () => void; onConnectSftp: () => void; onEdit: () => void; onDelete: () => void
+function HostRow({ server, template, columns, onConnect, onConnectSftp, onEdit, onDelete, menuOpen, onMenuOpen, onMenuClose }: {
+  server: ServerType; template: string; columns: ColDef[]
+  onConnect: () => void; onConnectSftp: () => void; onEdit: () => void; onDelete: () => void
   menuOpen: boolean; onMenuOpen: (e: React.MouseEvent) => void; onMenuClose: () => void
 }) {
   const [hovered, setHovered] = useState(false)
-  const color = getIconColor(server)
   const groups = useAppStore((s) => s.groups)
   const groupName = groups.find((g) => g.id === server.groupId)?.name
   const { color: osColor, Icon: OsIconComp } = getOsInfo(server, groupName)
@@ -846,41 +1181,82 @@ function HostRow({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen,
     }
   }
 
+  const cellStyle: React.CSSProperties = { color: 'var(--text-secondary)', fontSize: 12, minWidth: 0 }
+  const renderCell = (c: ColDef) => {
+    switch (c.key) {
+      case 'host': return <span className="truncate" style={cellStyle}>{server.host}</span>
+      case 'user': return <span className="truncate" style={cellStyle}>{server.username || '—'}</span>
+      case 'port': return <span className="truncate text-right" style={{ ...cellStyle, color: 'var(--text-muted)' }}>{server.port}</span>
+      case 'protocol': return <span style={{ minWidth: 0 }}><ProtoBadge proto={server.protocol ?? 'ssh'} /></span>
+      case 'lastConnected': return <span className="truncate" style={{ ...cellStyle, color: 'var(--text-muted)' }}>{formatLastUsed(server.lastConnected)}</span>
+      default: return <span />
+    }
+  }
+
   return (
     <div
-      className="relative flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer cs-glass"
+      className="relative grid items-center rounded-lg cursor-pointer cs-glass"
       style={{
+        gridTemplateColumns: template, gap: 8, padding: '7px 12px',
         background: hovered ? 'var(--bg-elevated)' : 'var(--bg-card)',
         border: `1px solid ${hovered ? 'var(--accent)' : 'var(--glass-border)'}`,
-        transition: 'all 0.12s',
+        transition: 'background 0.12s, border-color 0.12s',
         zIndex: menuOpen ? 50 : 'auto'
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={handleClick}
     >
+      {/* icon */}
       <div
         className="host-icon"
-        style={{ width: 32, height: 32, background: `linear-gradient(135deg, ${osColor}ee, ${osColor}99)`, fontSize: 11 }}
+        style={{ width: 30, height: 30, background: `linear-gradient(135deg, ${osColor}ee, ${osColor}99)`, fontSize: 11 }}
       >
-        <OsIconComp s={18} />
+        <OsIconComp s={17} />
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{server.name}</p>
-          <ProtoBadge proto={server.protocol ?? 'ssh'} />
+
+      {/* name */}
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="font-semibold truncate" style={{ color: 'var(--text-primary)', fontSize: 13 }}>{server.name}</span>
+      </div>
+
+      {/* dynamic columns */}
+      {columns.map((c) => (
+        <div key={c.key} className="flex items-center min-w-0" style={c.key === 'port' ? { justifyContent: 'flex-end' } : undefined}>
+          {renderCell(c)}
         </div>
-        <p className="text-xs truncate" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-          {server.username ? `${server.username}@` : ''}{server.host}:{server.port}
-        </p>
+      ))}
+
+      {/* flexible spacer keeps the fields packed left, actions pinned right */}
+      <span />
+
+      {/* actions */}
+      <div className="flex items-center justify-end" style={{ paddingRight: 4 }}>
+        <button
+          onClick={onMenuOpen}
+          className="flex items-center justify-center w-6 h-6 rounded"
+          style={{ color: 'var(--text-muted)', background: 'transparent' }}
+        >
+          <MoreHorizontal size={13} />
+        </button>
       </div>
+
+      {/* hover quick-actions — absolute so they don't reflow the table columns.
+          Opaque gradient masks the row text sitting behind the buttons. */}
       {hovered && (
-        <>
+        <div
+          className="absolute flex items-center gap-1.5"
+          style={{
+            right: 40, top: 1, bottom: 1, paddingLeft: 32, paddingRight: 4,
+            background: 'linear-gradient(to right, transparent, var(--bg-menu) 28px, var(--bg-menu))'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button
             onClick={(e) => { e.stopPropagation(); onConnect() }}
             className="flex items-center gap-1 px-2 py-1 rounded text-xs"
             style={{ background: 'var(--accent)', color: '#fff' }}
-            title="Conectar terminal"
+            title="Connect terminal"
           >
             {server.protocol === 'ssh' ? <Terminal size={11} /> : <Monitor size={11} />}
             {(server.protocol ?? 'ssh').toUpperCase()}
@@ -896,15 +1272,9 @@ function HostRow({ server, onConnect, onConnectSftp, onEdit, onDelete, menuOpen,
               SFTP
             </button>
           )}
-        </>
+        </div>
       )}
-      <button
-        onClick={onMenuOpen}
-        className="flex items-center justify-center w-6 h-6 rounded"
-        style={{ color: 'var(--text-muted)', background: 'transparent' }}
-      >
-        <MoreHorizontal size={13} />
-      </button>
+
       {menuOpen && (
         <DropMenu onClose={onMenuClose} items={[
           { label: 'Connect', onClick: onConnect },
@@ -943,8 +1313,8 @@ function DropMenu({ items, onClose, align = 'right' }: {
 }) {
   return (
     <div
-      className="absolute top-7 z-50 rounded-lg py-1 animate-fade-in cs-glass-strong"
-      style={{ [align]: 0, background: 'var(--bg-elevated)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', minWidth: 140 }}
+      className="absolute top-7 z-50 rounded-lg py-1 animate-fade-in"
+      style={{ [align]: 0, background: 'var(--bg-menu)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', minWidth: 140 }}
       onClick={(e) => e.stopPropagation()}
     >
       {items.map((item) => (

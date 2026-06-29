@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import WebSocket from 'ws'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -50,6 +50,10 @@ export function isCloudConfigured(): boolean {
 export function getClient(): SupabaseClient {
   if (!client) {
     if (!isCloudConfigured()) throw new Error('Nuvem não configurada (.env ausente).')
+    // Loaded lazily so the package's Node-version deprecation check doesn't run
+    // at app startup — cloud is dormant (UI removed since v1.17.0) and this path
+    // is only reached if a cloud op is actually invoked.
+    const { createClient } = require('@supabase/supabase-js') as typeof import('@supabase/supabase-js')
     client = createClient(SUPABASE_URL, SUPABASE_ANON, {
       auth: {
         storage: fileStorage,

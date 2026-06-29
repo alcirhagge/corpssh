@@ -75,6 +75,8 @@ function expand(s: ThemeSeed): Record<string, string> {
 
     '--bg-surface': `rgba(${tint}, ${a.surface})`,
     '--bg-elevated': `rgba(${tint}, ${a.elevated})`,
+    // Fully opaque surface for floating menus/popovers so text behind never bleeds through.
+    '--bg-menu': `rgb(${tint})`,
     '--bg-card': `rgba(${tint}, ${a.card})`,
     '--bg-input': `rgba(${tint}, ${a.input})`,
     '--bg-hover': ov.hover,
