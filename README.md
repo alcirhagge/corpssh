@@ -1,6 +1,6 @@
 # CorpSSH
 
-Cliente SSH corporativo desktop com interface moderna, suporte a múltiplas conexões simultâneas, browser SFTP, sistema de logs e integração com servidores de logging externos.
+Cliente de acesso remoto desktop (SSH, SFTP, RDP e VNC) com interface moderna: terminal multi-aba com split panes, túneis SSH, cofre de credenciais, snippets, logs/auditoria com envio para servidores externos e sincronização opcional em nuvem.
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -44,25 +44,41 @@ O hash exibido deve ser igual ao que está em `SHA256SUMS-windows.txt`.
 ## Funcionalidades
 
 **Conexões SSH**
-- Terminal interativo completo com suporte a cores, scroll e busca (Ctrl+F)
-- Múltiplas conexões simultâneas em abas
+- Terminal interativo completo (xterm.js) com cores, scroll e busca (Ctrl+F)
+- Múltiplas conexões simultâneas em abas, split panes (2 / 2x2) com Alt+drag para reorganizar
 - Autenticação por senha, chave privada (.pem, .key, ed25519) ou agente SSH
-- Reconexão automática
+- ProxyJump (host de salto reaproveitado por SSH e VNC)
+- Verificação de host key (known_hosts, TOFU) e reconexão automática
+- Histórico de comandos
 
-**Gerenciamento de hosts**
-- Dashboard visual com visualização em grid ou lista
-- Grupos e pastas para organizar servidores
-- Cores e ícones personalizados por servidor
-- Busca rápida por nome, host ou usuário
+**Túneis SSH**
+- Local (-L), remoto (-R) e dinâmico/SOCKS5 (-D), presos à sessão
 
 **SFTP**
 - Browser de arquivos integrado por sessão
 - Upload, download e exclusão de arquivos
 - Navegação por pastas com breadcrumb
 
+**RDP**
+- Dispara o cliente nativo do SO (mstsc no Windows, xfreerdp no Linux/macOS) a partir de um .rdp gerado
+
+**VNC**
+- Viewer noVNC embutido via bridge WebSocket
+- Conexão direta ou tunelada por uma sessão SSH viva (alcança hosts só-loopback, ex.: wayvnc num bastion)
+
+**Gerenciamento de hosts**
+- Dashboard em grid ou tabela configurável (colunas ordenáveis, múltiplas views)
+- Grupos e pastas para organizar servidores
+- Cores e ícones personalizados por servidor
+- Busca rápida por nome, host ou usuário
+
+**Cofre e Snippets**
+- Cofre local de credenciais e chaves, protegido pelo safeStorage do SO
+- Snippets de comandos reutilizáveis
+
 **Logs e auditoria**
 - Registro de todos os eventos de conexão (connect, disconnect, erros)
-- Log completo de cada sessão SSH — output do terminal e comandos digitados
+- Transcript append-only de cada sessão SSH (sobrevive a clear e a apps full-screen)
 - Visualização de sessões históricas com busca
 - Exportação de logs em CSV
 - Integração com servidores de logging externos:
@@ -72,8 +88,14 @@ O hash exibido deve ser igual ao que está em `SHA256SUMS-windows.txt`.
   - Syslog (UDP RFC5424)
 
 **Export / Import**
-- Exporta lista de servidores e grupos para XML
+- Exporta servidores, grupos e credenciais para XML (segredos selados com scrypt + AES-256-GCM)
 - Importa de arquivo XML (merge, sem sobrescrever dados existentes)
+- Importa do mRemoteNG
+
+**Sincronização em nuvem (opcional)**
+- Replica servidores/grupos/credenciais entre dispositivos via Supabase
+- Segredos selados fim-a-fim: o servidor só vê ciphertext
+- Last-write-wins; não propaga deleções (nunca remove dado)
 
 **Atualização automática**
 - Detecta novas versões automaticamente via GitHub Releases
@@ -92,11 +114,15 @@ O hash exibido deve ser igual ao que está em `SHA256SUMS-windows.txt`.
 
 | Camada | Tecnologia |
 |---|---|
-| Framework desktop | Electron 28 |
+| Framework desktop | Electron 42 |
 | UI | React 18 + TypeScript |
 | Build | electron-vite + Vite 5 |
 | Terminal | xterm.js |
-| SSH | ssh2 |
+| SSH / SFTP | ssh2 |
+| VNC | ws + @novnc/novnc |
+| RDP | cliente nativo do SO (mstsc / xfreerdp) |
+| Criptografia | scrypt + AES-256-GCM (Node crypto) + safeStorage |
+| Cloud sync | @supabase/supabase-js |
 | Estilos | Tailwind CSS |
 | Estado | Zustand |
 | Auto-update | electron-updater |
@@ -146,30 +172,33 @@ git push origin main vX.X.X
 
 ```
 src/
-├── main/               # Processo principal Electron (Node.js)
-│   ├── index.ts        # Entry point, auto-updater
-│   ├── ipcHandlers.ts  # Handlers IPC
-│   ├── sshManager.ts   # Gerenciamento de conexões SSH
-│   ├── logger.ts       # Log de eventos
-│   ├── sessionLogger.ts# Log de sessões (terminal completo)
-│   ├── remoteLogger.ts # Envio para Graylog/Loki/Syslog/ES
-│   ├── xmlManager.ts   # Export/Import XML
-│   └── store.ts        # Persistência local (JSON)
+├── main/                 # Processo principal Electron (Node.js) — tudo que toca rede/disco/credenciais
+│   ├── index.ts          # Entry point, janela frameless, deep link corpssh://, auto-updater
+│   ├── ipcHandlers.ts    # Handlers IPC (fronteira de confiança)
+│   ├── sshManager.ts     # Conexões SSH/SFTP/shell/exec
+│   ├── portForward.ts    # Túneis -L / -R / -D
+│   ├── rdpManager.ts     # Gera .rdp e dispara o cliente RDP do SO
+│   ├── vncManager.ts     # Bridge WebSocket noVNC <-> VNC (direta ou via SSH)
+│   ├── knownHosts.ts     # Verificação de host key
+│   ├── commandHistory.ts # Histórico de comandos
+│   ├── crypto.ts         # Selagem portável scrypt + AES-256-GCM
+│   ├── cloudClient.ts    # Login Supabase
+│   ├── cloudSync.ts      # Sync last-write-wins com segredos selados
+│   ├── logger.ts         # Log de eventos
+│   ├── sessionLogger.ts  # Transcript append-only das sessões
+│   ├── remoteLogger.ts   # Envio para Graylog/Loki/Syslog/ES
+│   ├── xmlManager.ts     # Export/Import XML
+│   ├── mremoteng.ts      # Import do mRemoteNG
+│   └── store.ts          # Persistência local (JSON + safeStorage)
 ├── preload/
-│   └── index.ts        # Bridge IPC segura (contextBridge)
-└── renderer/           # App React
+│   └── index.ts          # Bridge IPC segura (contextBridge -> window.api)
+└── renderer/             # App React
     └── src/
-        ├── components/
-        │   ├── Dashboard/   # HostDashboard, HostForm, HostCard
-        │   ├── Terminal/    # TerminalPane, TabBar
-        │   ├── SFTP/        # SFTPBrowser
-        │   ├── Logs/        # LogsPanel (eventos + sessões + remote)
-        │   ├── Export/      # ExportPanel
-        │   ├── Dialogs/     # SettingsPanel
-        │   └── Layout/      # TitleBar, Sidebar, StatusBar
-        ├── store/           # Zustand global store
-        ├── styles/          # CSS variables (dark/light themes)
-        └── types.ts         # TypeScript types
+        ├── components/   # Por feature: Dashboard, Terminal, SFTP, Tunnels, Vault,
+        │                 # Snippets, Cloud, Logs, Export, Dialogs, Layout
+        ├── store/        # Zustand global store
+        ├── styles/       # CSS variables (dark/light themes)
+        └── types.ts      # TypeScript types
 ```
 
 ---
@@ -182,6 +211,8 @@ O app salva todos os dados em `~/.corpssh/`:
 ~/.corpssh/
 ├── data.json         # Servidores, grupos, chaves, configurações
 ├── events.json       # Log de eventos de conexão
+├── known_hosts.json  # Host keys aceitas (TOFU)
+├── command_history.json
 └── sessions/
     ├── {id}.log      # Log completo de cada sessão SSH
     └── {id}.json     # Metadados da sessão
