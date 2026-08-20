@@ -49,7 +49,13 @@ O hash exibido deve ser igual ao que está em `SHA256SUMS-windows.txt`.
 - Autenticação por senha, chave privada (.pem, .key, ed25519) ou agente SSH
 - ProxyJump (host de salto reaproveitado por SSH e VNC)
 - Verificação de host key (known_hosts, TOFU) e reconexão automática
-- Histórico de comandos
+- Histórico de comandos (Ctrl+R), com exit code quando a shell integration está ativa
+
+**Shell integration (bash, hosts Linux)**
+- Snippet injetado ao abrir o shell (OSC 133 / OSC 7, sem `trap DEBUG`), só em hosts com OS Linux detectado — nunca em OLT/MikroTik/switch; override por host (auto / on / off)
+- Histórico grava o comando **real** (pós-edição do readline) e o exit code; barra verde/vermelha na margem de cada comando
+- Diretório atual na aba; SFTP abre no cwd do terminal (e botão pra voltar a ele)
+- Ctrl+↑/↓ pula entre prompts · Ctrl+Shift+O copia a saída do último comando
 
 **Túneis SSH**
 - Local (-L), remoto (-R) e dinâmico/SOCKS5 (-D), presos à sessão

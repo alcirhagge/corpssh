@@ -4,7 +4,7 @@ import * as net from 'net'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { appendSessionData, appendSessionCommand, resizeSession } from './sessionLogger'
+import { appendSessionData, appendSessionCommand, resizeSession, isShellIntegrated, expectSetupClear } from './sessionLogger'
 import { verifyHostKey } from './knownHosts'
 import { recordCommand } from './commandHistory'
 
@@ -486,6 +486,11 @@ export function sendInput(sessionId: string, data: string): void {
   const conn = activeConnections.get(sessionId)
   if (conn?.stream) conn.stream.write(data)
 
+  // With shell integration live, the shell itself reports each command (after
+  // readline editing) through OSC 133 — see sessionLogger — which is far more
+  // accurate than reassembling keystrokes. Skip the keystroke buffer then.
+  if (isShellIntegrated(sessionId)) return
+
   let buf = cmdBuffers.get(sessionId) ?? ''
   for (const ch of data) {
     if (ch === '\r' || ch === '\n') {
@@ -499,6 +504,17 @@ export function sendInput(sessionId: string, data: string): void {
     }
   }
   cmdBuffers.set(sessionId, buf)
+}
+
+// Setup text sent on the user's behalf (color aliases, shell-integration
+// script). Goes straight to the PTY: it is not a typed command, so it must not
+// land in the command history, and the echoed script must not be transcribed
+// into the session log (the trailing `clear` is flagged so the logger skips it).
+export function injectSetup(sessionId: string, text: string): void {
+  const conn = activeConnections.get(sessionId)
+  if (!conn?.stream) return
+  expectSetupClear(sessionId)
+  conn.stream.write(text)
 }
 
 export function resizeTerminal(sessionId: string, cols: number, rows: number): void {

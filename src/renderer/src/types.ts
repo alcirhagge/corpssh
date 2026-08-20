@@ -26,6 +26,9 @@ export interface Server {
   credentialId?: string
   /** Optional saved-server id to tunnel through before reaching this host (ProxyJump). */
   jumpHostId?: string
+  /** Shell integration (OSC 133/7 marks via an injected bash snippet).
+   *  'auto' (default) = only when the detected OS is Linux; never network gear. */
+  shellIntegration?: 'auto' | 'on' | 'off'
 }
 
 export interface Credential {
@@ -93,6 +96,9 @@ export interface AppSettings {
   terminalFgColor?: string
   /** Auto-enable ls/grep/ip colors on connect for Linux hosts. Default true. */
   terminalAutoColor?: boolean
+  /** Inject the bash shell-integration snippet on Linux hosts (real command
+   *  history, exit codes, cwd in tab, SFTP-at-cwd). Default true. */
+  terminalShellIntegration?: boolean
   /** TOFU host-key verification. Default true. */
   strictHostKey?: boolean
   /** Auto-reconnect a session dropped unexpectedly. Default true. */
@@ -114,6 +120,10 @@ export interface Tab {
   pendingCommand?: string
   /** 'normal' = user-opened session; 'script' = spawned by a snippet broadcast */
   kind?: 'normal' | 'script'
+  /** Remote working directory reported by the shell integration (OSC 7). */
+  cwd?: string
+  /** True once the remote shell started emitting integration marks. */
+  shellIntegrated?: boolean
 }
 
 export interface SFTPEntry {

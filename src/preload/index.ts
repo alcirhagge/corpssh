@@ -69,6 +69,8 @@ const api = {
     shell: (sessionId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('ssh:shell', sessionId, cols, rows),
     input: (sessionId: string, data: string) => ipcRenderer.send('ssh:input', sessionId, data),
+    /** Setup text (color aliases, shell integration) — bypasses command tracking and the session log. */
+    inject: (sessionId: string, data: string) => ipcRenderer.send('ssh:inject', sessionId, data),
     resize: (sessionId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('ssh:resize', sessionId, cols, rows),
     disconnect: (sessionId: string) => ipcRenderer.invoke('ssh:disconnect', sessionId),
@@ -76,7 +78,7 @@ const api = {
     forgetHostKey: (host: string, port: number) => ipcRenderer.invoke('ssh:forgetHostKey', host, port),
     trustHostKey: (host: string, port: number, fp: string) => ipcRenderer.invoke('ssh:trustHostKey', host, port, fp),
     listKnownHosts: (): Promise<{ host: string; port: number; fp: string }[]> => ipcRenderer.invoke('ssh:listKnownHosts'),
-    historyList: (query?: string, limit?: number): Promise<{ cmd: string; ts: number; count: number }[]> =>
+    historyList: (query?: string, limit?: number): Promise<{ cmd: string; ts: number; count: number; exit?: number }[]> =>
       ipcRenderer.invoke('history:list', query, limit),
     historyClear: () => ipcRenderer.invoke('history:clear'),
     rtt: (host: string, port: number): Promise<number> => ipcRenderer.invoke('net:rtt', host, port),

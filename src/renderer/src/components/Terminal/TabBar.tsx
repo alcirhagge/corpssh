@@ -15,6 +15,15 @@ interface TabBarProps {
 
 interface CtxMenu { tabId: string; x: number; y: number }
 
+// "/home/alcir/projects/corpssh" → "corpssh"; "/" stays "/"; "~" for a bare home.
+function shortCwd(cwd: string): string {
+  const parts = cwd.split('/').filter(Boolean)
+  if (!parts.length) return '/'
+  if (parts.length === 2 && parts[0] === 'home') return '~'
+  if (parts.length === 1 && parts[0] === 'root') return '~'
+  return parts[parts.length - 1]
+}
+
 export default function TabBar({ kind, onCloseTab, onNewTab, onToggleSftp, onConnectServer, onBroadcastSnippet }: TabBarProps) {
   const { tabs, activeTabId, activateTab, focusTerminal, broadcastInput, setBroadcastInput, paneLayout, panes, setPaneLayout } = useAppStore()
   const kindTabs = tabs.filter((t) => (t.kind ?? 'normal') === kind)
@@ -830,6 +839,16 @@ function TabItem({
       }}>
         {tab.serverName}
       </span>
+      {/* Remote cwd from the shell integration — last path segment, full path on hover. */}
+      {tab.cwd && tab.status === 'connected' && (
+        <span
+          className="font-mono"
+          style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}
+          title={tab.cwd}
+        >
+          {shortCwd(tab.cwd)}
+        </span>
+      )}
 
       {/* Shown-in-grid marker (split mode): a thin accent dot when this tab
           occupies a pane but isn't the focused one. */}
