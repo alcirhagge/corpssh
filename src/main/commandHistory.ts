@@ -17,6 +17,8 @@ export interface CommandEntry {
   cmd: string
   ts: number    // last-used epoch ms
   count: number // times run
+  /** Exit status of the last run, when the shell integration reported it. */
+  exit?: number
 }
 
 // Skip anything that smells like a secret so we never persist a password/token.
@@ -44,7 +46,7 @@ function persist(): void {
 
 // Record one completed command. Dedupes (existing entry floats to the front and
 // bumps its count) and caps the store at MAX_ENTRIES (oldest dropped).
-export function recordCommand(raw: string): void {
+export function recordCommand(raw: string, exitCode?: number | null): void {
   const cmd = raw.trim()
   if (cmd.length < 2 || cmd.length > 4000) return  // ignore noise and pathological pastes
   if (SENSITIVE.test(cmd)) return
@@ -56,9 +58,10 @@ export function recordCommand(raw: string): void {
     const [entry] = list.splice(idx, 1)
     entry.ts = now
     entry.count += 1
+    if (typeof exitCode === 'number') entry.exit = exitCode
     list.unshift(entry)
   } else {
-    list.unshift({ cmd, ts: now, count: 1 })
+    list.unshift({ cmd, ts: now, count: 1, ...(typeof exitCode === 'number' ? { exit: exitCode } : {}) })
     if (list.length > MAX_ENTRIES) list.length = MAX_ENTRIES
   }
   persist()

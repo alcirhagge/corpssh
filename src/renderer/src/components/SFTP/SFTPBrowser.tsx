@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Folder, File, RefreshCw, ArrowLeft, ArrowRight, FolderOpen, AlertCircle } from 'lucide-react'
+import { Folder, File, RefreshCw, ArrowLeft, ArrowRight, FolderOpen, AlertCircle, Terminal } from 'lucide-react'
 import type { Tab } from '../../types'
 
 interface PaneEntry {
@@ -98,9 +98,11 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
   }, [])
 
   useEffect(() => {
-    // Open the server pane at the user's home dir (writable) instead of '/'
+    // Open the server pane where the terminal is (shell integration cwd) when
+    // known, else at the user's home dir (writable) instead of '/'
     if (tab.sessionId) {
-      window.api.sftp.home(tab.sessionId)
+      if (tab.cwd) loadRemote(tab.cwd)
+      else window.api.sftp.home(tab.sessionId)
         .then((h) => loadRemote(h || '/'))
         .catch(() => loadRemote('/'))
     }
@@ -304,6 +306,7 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
           canGoParent={remotePath !== '/'}
           onRefresh={() => loadRemote(remotePath)}
           currentPath={remotePath}
+          terminalCwd={tab.cwd}
           onOpenFile={editRemoteFile}
           onDropFiles={handleDropToRemote}
           editingPaths={editing}
@@ -316,7 +319,7 @@ export default function SFTPBrowser({ tab }: SFTPBrowserProps) {
 function FilePane({
   title, path, entries, loading, selected,
   onNavigate, onSelect, onParent, canGoParent, onRefresh, currentPath,
-  onOpenFile, onDropFiles, editingPaths
+  onOpenFile, onDropFiles, editingPaths, terminalCwd
 }: {
   title: string
   path: string
@@ -335,6 +338,8 @@ function FilePane({
   onDropFiles?: (paths: string[]) => void
   /** Remote full paths currently open for editing (shows a live badge). */
   editingPaths?: Set<string>
+  /** The terminal's current directory (shell integration) — one-click jump. */
+  terminalCwd?: string
 }) {
   const displayPath = path.length > 32 ? '…' + path.slice(-30) : path
   const [dragOver, setDragOver] = useState(false)
@@ -396,6 +401,16 @@ function FilePane({
         >
           <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
         </button>
+        {terminalCwd && terminalCwd !== currentPath && (
+          <button
+            onClick={() => onNavigate(terminalCwd)}
+            className="flex items-center justify-center w-6 h-6 rounded"
+            style={{ color: 'var(--accent)', background: 'transparent' }}
+            title={`Go to terminal directory: ${terminalCwd}`}
+          >
+            <Terminal size={11} />
+          </button>
+        )}
         <span
           className="truncate text-xs flex-1"
           style={{ color: 'var(--text-secondary)', fontSize: 11 }}
