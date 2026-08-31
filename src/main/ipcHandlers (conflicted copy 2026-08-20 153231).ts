@@ -20,6 +20,7 @@ import {
   createSSHConnection,
   createShellSession,
   sendInput,
+  injectSetup,
   resizeTerminal,
   disconnectSSH,
   listSFTPDirectory,
@@ -538,6 +539,10 @@ export function setupIpcHandlers(): void {
   // 'send' (fire-and-forget), not 'invoke' — avoids a Promise round-trip per keystroke
   ipcMain.on('ssh:input', (_e, sessionId: string, data: string) => {
     sendInput(sessionId, data)
+  })
+
+  ipcMain.on('ssh:inject', (_e, sessionId: string, data: string) => {
+    injectSetup(sessionId, data)
   })
 
   ipcMain.handle('ssh:resize', (_e, sessionId: string, cols: number, rows: number) => {

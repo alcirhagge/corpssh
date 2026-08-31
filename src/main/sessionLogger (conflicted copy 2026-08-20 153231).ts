@@ -2,6 +2,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { Terminal } from '@xterm/headless'
+import { attachShellIntegration, type ShellIntegration } from '../shared/shellIntegration'
+import { recordCommand } from './commandHistory'
 
 const SESSIONS_DIR = path.join(os.homedir(), '.corpssh', 'sessions')
 
@@ -52,6 +54,10 @@ interface Session {
   committed: number
   inAlt: boolean       // currently inside the alternate screen?
   altSince: number     // timestamp the alt screen was entered (for the marker)
+  si: ShellIntegration // OSC 133/7 tracker (real commands + exit codes)
+  // Deadline until which the next hard clear is the one ending our own setup
+  // injection: its viewport (the echoed script) is dropped instead of flushed.
+  setupClearUntil: number
 }
 
 const SCROLLBACK = 10000
@@ -96,7 +102,24 @@ export function createSessionLog(meta: SessionMeta): void {
     scrollback: SCROLLBACK,
     allowProposedApi: true // needed for buffer.active access
   })
-  sessions.set(meta.sessionId, { term, committed: 0, inAlt: false, altSince: 0 })
+  // Commands reported by the shell (when the integration script is running)
+  // feed the Ctrl+R history with the exact command line and its exit status.
+  const si = attachShellIntegration(term, {
+    onCommand: (c) => recordCommand(c.command, c.exitCode)
+  })
+  sessions.set(meta.sessionId, { term, committed: 0, inAlt: false, altSince: 0, si, setupClearUntil: 0 })
+}
+
+// True once the remote shell has started emitting integration marks.
+export function isShellIntegrated(sessionId: string): boolean {
+  return sessions.get(sessionId)?.si.active ?? false
+}
+
+// Called right before setup text is injected: the `clear` that ends it must not
+// flush the echoed script into the transcript.
+export function expectSetupClear(sessionId: string): void {
+  const s = sessions.get(sessionId)
+  if (s) s.setupClearUntil = Date.now() + 15000
 }
 
 function renderLine(term: Terminal, i: number): string {
@@ -163,10 +186,13 @@ export function appendSessionData(sessionId: string, data: string): void {
   const entersAlt = !s.inAlt && ALT_ENTER.test(data)
   const leavesAlt = s.inAlt && ALT_LEAVE.test(data)
   const hardClear = !s.inAlt && HARD_CLEAR.test(data)
+  // The clear closing our own setup injection: drop the echoed script silently.
+  const setupClear = hardClear && s.setupClearUntil > Date.now()
+  if (setupClear) s.setupClearUntil = 0
 
   // Preserve content that's about to be destroyed: read the CURRENT (pre-write)
   // buffer and flush the live viewport before the emulator processes the data.
-  if (entersAlt || hardClear) {
+  if (entersAlt || (hardClear && !setupClear)) {
     whenDrained(s.term, () => flushViewport(s, sessionId))
   }
   if (entersAlt) {
@@ -221,7 +247,7 @@ export function closeSessionLog(sessionId: string, endedAt: number): void {
   const finalize = (): void => {
     const footer = `\n${'='.repeat(40)}\nSession ended: ${new Date(endedAt).toISOString()}\n`
     appendToDisk(sessionId, footer)
-    if (s) { s.term.dispose(); sessions.delete(sessionId) }
+    if (s) { s.si.dispose(); s.term.dispose(); sessions.delete(sessionId) }
     dirty.delete(sessionId)
   }
 
@@ -296,7 +322,7 @@ export function readSessionLog(sessionId: string): Promise<string> {
 
 export function deleteSession(sessionId: string): void {
   const s = sessions.get(sessionId)
-  if (s) { s.term.dispose(); sessions.delete(sessionId) }
+  if (s) { s.si.dispose(); s.term.dispose(); sessions.delete(sessionId) }
   dirty.delete(sessionId)
   if (fs.existsSync(logPath(sessionId))) fs.unlinkSync(logPath(sessionId))
   if (fs.existsSync(metaPath(sessionId))) fs.unlinkSync(metaPath(sessionId))

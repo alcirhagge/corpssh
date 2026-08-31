@@ -319,6 +319,19 @@ export default function HostForm({ onConnect }: { onConnect: (server: Server) =>
                 ))}
             </select>
 
+            {/* Shell integration: bash snippet that reports commands / exit codes / cwd.
+                'auto' only fires on a detected Linux OS — never on network gear. */}
+            <select
+              value={form.shellIntegration ?? 'auto'}
+              onChange={(e) => set('shellIntegration', e.target.value === 'auto' ? undefined : (e.target.value as 'on' | 'off'))}
+              className="mb-2"
+              title="Shell integration (bash): histórico real, exit codes, diretório atual na aba, SFTP abre no cwd"
+            >
+              <option value="auto">Shell integration: auto (Linux detected)</option>
+              <option value="on">Shell integration: always on (bash)</option>
+              <option value="off">Shell integration: off</option>
+            </select>
+
             {form.credentialId ? (
               <div
                 className="px-3 py-2 rounded text-xs mb-1"

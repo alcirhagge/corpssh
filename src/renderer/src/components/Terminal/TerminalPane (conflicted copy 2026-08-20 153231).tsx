@@ -7,7 +7,8 @@ import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { useAppStore } from '../../store/appStore'
 import type { Tab } from '../../types'
-import { Search, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Search, X, ChevronDown, ChevronUp, Zap } from 'lucide-react'
+import { attachShellIntegration, SHELL_INTEGRATION_SCRIPT, type ShellIntegration } from '../../../../shared/shellIntegration'
 
 // One hit from the buffer scan: absolute line (incl. scrollback), column where
 // the match starts, and the full line text (for the sidebar snippet).
@@ -36,11 +37,31 @@ const LINUX_OS = new Set([
   'alpine', 'suse', 'linux', 'freebsd', 'raspberrypi'
 ])
 
-// Leading space keeps it out of history (HISTCONTROL=ignorespace); the trailing
-// `clear` wipes the echoed aliases so the session opens on a clean prompt.
-const COLOR_PRELUDE =
+// Leading space keeps it out of history (HISTCONTROL=ignorespace). Setup text
+// always ends with a `clear` (see buildSetup) so the echoed lines vanish and the
+// session opens on a clean prompt.
+const COLOR_ALIASES =
   " alias ls='ls --color=auto' 2>/dev/null; alias grep='grep --color=auto' 2>/dev/null;" +
-  " command ip -c -V >/dev/null 2>&1 && alias ip='ip -c'; clear\n"
+  " command ip -c -V >/dev/null 2>&1 && alias ip='ip -c'\n"
+const CLEAR_LINE = ' clear\n'
+
+// Decide what to inject once the shell is live. Colors and the shell-integration
+// snippet both key off the DETECTED OS (so they never run on switches / OLTs /
+// MikroTik); the host form can force integration on/off per host.
+function buildSetup(serverId: string): { text: string; integration: boolean } {
+  const st = useAppStore.getState()
+  const srv = st.servers.find((s) => s.id === serverId)
+  const isLinux = !!srv?.detectedOs && LINUX_OS.has(srv.detectedOs)
+  const colors = st.settings.terminalAutoColor !== false && isLinux
+  const pref = srv?.shellIntegration ?? 'auto'
+  const integration = st.settings.terminalShellIntegration !== false &&
+    (pref === 'on' || (pref === 'auto' && isLinux))
+  let text = ''
+  if (colors) text += COLOR_ALIASES
+  if (integration) text += SHELL_INTEGRATION_SCRIPT  // ends with its own clear
+  else if (colors) text += CLEAR_LINE
+  return { text, integration }
+}
 
 function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoReconnect, onReconnect, onClose }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -60,6 +81,11 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
   const [copyNotice, setCopyNotice] = useState<{ chars: number; key: number } | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [rtt, setRtt] = useState<number | null>(null)
+  // Shell integration (OSC 133/7): live once the remote bash runs our snippet.
+  const siRef = useRef<ShellIntegration | null>(null)
+  const [siActive, setSiActive] = useState(false)
+  const tabIdRef = useRef(tab.id)
+  tabIdRef.current = tab.id
 
   // Refs so the long-lived onClosed handler (bound once per sessionId) always
   // reads the CURRENT auto-reconnect settings instead of mount-time values.
@@ -155,6 +181,7 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
       theme: getTheme(),
       allowTransparency: false,
       macOptionIsMeta: true,
+      allowProposedApi: true,  // registerDecoration (exit-code gutter) is still gated behind this
     })
 
     terminal.loadAddon(fitAddon)
@@ -169,6 +196,42 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
 
     terminalRef.current = terminal
     fitAddonRef.current = fitAddon
+
+    // ── Shell integration marks → cwd in the tab, exit-code gutter, prompt list.
+    // A thin bar at the left edge of each command's line: green = exit 0, red
+    // otherwise. Decorations ride on markers, so they scroll with the buffer
+    // and vanish when the line leaves the scrollback. Capped to keep memory flat.
+    const gutter: Array<{ dispose(): void }> = []
+    const si = attachShellIntegration(terminal, {
+      onActivate: () => {
+        setSiActive(true)
+        useAppStore.getState().updateTab(tabIdRef.current, { shellIntegrated: true })
+      },
+      onCwd: (cwd) => useAppStore.getState().updateTab(tabIdRef.current, { cwd }),
+      onCommand: (c) => {
+        // Never let a decoration hiccup throw inside the parser: an exception here
+        // would abort the rest of the data chunk (and the marks riding in it).
+        try {
+          const buf = terminal.buffer.active
+          const marker = terminal.registerMarker(c.commandLine - (buf.baseY + buf.cursorY))
+          if (!marker || marker.isDisposed) return
+          const deco = terminal.registerDecoration({ marker, x: 0, width: 1, layer: 'top' })
+          if (!deco) { marker.dispose(); return }
+          const color = c.exitCode === 0 || c.exitCode === null ? 'rgba(48,212,138,0.85)' : 'rgba(255,87,87,0.9)'
+          deco.onRender((el) => {
+            el.style.width = '3px'
+            el.style.left = '0'
+            el.style.borderRadius = '2px'
+            el.style.background = color
+            el.style.pointerEvents = 'none'
+            el.title = c.exitCode === null ? c.command : `exit ${c.exitCode} — ${c.command}`
+          })
+          gutter.push(deco)
+          if (gutter.length > 300) gutter.shift()?.dispose()
+        } catch { /* decorations are cosmetic */ }
+      }
+    })
+    siRef.current = si
 
     // Copy: Ctrl+C with selection, Ctrl+Shift+C
     // Paste: block \x16 from going to SSH — the paste DOM event handles the actual paste
@@ -193,6 +256,34 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
         e.preventDefault()
         const st = useAppStore.getState()
         st.setPaneLayout(st.paneLayout === '1' ? '2v' : st.paneLayout === '2v' ? '2x2' : '1')
+        return false
+      }
+      // ── Shell-integration shortcuts (only once marks are flowing, so on hosts
+      // without it the keys still reach the remote untouched).
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && si.prompts.length) {
+        e.preventDefault()
+        const prompts = si.prompts.filter((l) => l < terminal.buffer.active.length)
+        if (!prompts.length) return false
+        const top = terminal.buffer.active.viewportY
+        // Up: nearest prompt strictly above the viewport top; Down: nearest below.
+        let target: number | undefined
+        if (e.key === 'ArrowUp') { for (const l of prompts) { if (l < top) target = l; else break } }
+        else { target = prompts.find((l) => l > top) }
+        if (target !== undefined) terminal.scrollToLine(target)
+        return false
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'o' || e.key === 'O') && si.commands.length) {
+        e.preventDefault()
+        const last = si.commands[si.commands.length - 1]
+        const from = last.outputLine !== null ? last.outputLine + (last.outputLine === last.commandLine ? 1 : 0) : last.commandLine + 1
+        const buf = terminal.buffer.active
+        const lines: string[] = []
+        for (let y = from; y < last.endLine && y < buf.length; y++) {
+          const ln = buf.getLine(y)
+          if (ln) lines.push(ln.translateToString(true))
+        }
+        const text = lines.join('\n').replace(/\n+$/, '')
+        if (text) { window.api.clipboard.writeText(text); setCopyNotice({ chars: text.length, key: Date.now() }) }
         return false
       }
       // Ctrl/Cmd+F → toggle find bar (xterm would otherwise send ^F to the PTY)
@@ -318,6 +409,9 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
       webglRef.current = null
       canvasRef.current?.dispose()
       canvasRef.current = null
+      for (const d of gutter) d.dispose()
+      si.dispose()
+      siRef.current = null
       terminal.dispose()
       terminalRef.current = null
     }
@@ -333,6 +427,10 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
     if (!tab.sessionId || !terminal || !fitAddon) return
 
     setIsDisconnected(false)  // a fresh transport clears any "session closed" overlay
+    // New transport, new remote shell: forget the old shell's marks/cwd.
+    siRef.current?.reset()
+    setSiActive(false)
+    updateTab(tab.id, { cwd: undefined, shellIntegrated: false })
 
     // SSH data → terminal
     const unsubData = window.api.ssh.onData(tab.sessionId, data => {
@@ -360,12 +458,12 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
       shellOpenedRef.current = true
       window.api.ssh.shell(tab.sessionId!, cols, rows)
         .then(() => {
-          // Auto-enable ls/grep/ip colors on Linux hosts (uses the detected OS,
-          // so it never runs on switches / OLTs / MikroTik).
-          const srv = useAppStore.getState().servers.find((s) => s.id === tab.serverId)
-          if (settings.terminalAutoColor !== false && srv?.detectedOs && LINUX_OS.has(srv.detectedOs)) {
-            window.api.ssh.input(tab.sessionId!, COLOR_PRELUDE)
-          }
+          // Setup text (color aliases + shell-integration snippet) keyed off the
+          // detected OS, so it never runs on switches / OLTs / MikroTik. Sent via
+          // `inject`, not `input`: it is not a typed command (no history entry,
+          // and the logger drops the echoed script).
+          const setup = buildSetup(tab.serverId)
+          if (setup.text) window.api.ssh.inject(tab.sessionId!, setup.text)
           // Snippet broadcast: run the queued command once the shell is live, then clear it
           if (tab.pendingCommand) {
             window.api.ssh.input(tab.sessionId!, tab.pendingCommand + '\n')
@@ -596,11 +694,25 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
           copied {copyNotice.chars} {copyNotice.chars === 1 ? 'char' : 'chars'} to clipboard
         </div>
       )}
+      {isActive && siActive && (
+        <div
+          className="absolute z-20 px-2 py-0.5 rounded-md text-xs font-medium pointer-events-none flex items-center gap-1"
+          style={{
+            bottom: 6, left: rtt !== null ? 78 : 6, fontSize: 10,
+            background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+            color: 'var(--accent)'
+          }}
+          title="Shell integration active — real command history, exit codes, cwd. Ctrl+↑/↓ jump between prompts · Ctrl+Shift+O copy last output"
+        >
+          <Zap size={9} />
+          shell
+        </div>
+      )}
       {isActive && rtt !== null && (
         <div
           className="absolute z-20 px-2 py-0.5 rounded-md text-xs font-medium tabular-nums pointer-events-none flex items-center gap-1"
           style={{
-            bottom: 6, left: 6, fontSize: 10,
+            bottom: 6, left: 6, fontSize: 10, minWidth: 66, justifyContent: 'center',
             background: 'var(--bg-elevated)', border: '1px solid var(--border)',
             color: rtt < 0 ? 'var(--text-muted)'
               : rtt < 80 ? 'var(--success)'
@@ -754,7 +866,7 @@ function TerminalPane({ tab, isActive, isPageVisible, autoReconnect, onAutoRecon
 // A centered palette over the terminal. Type to filter the persistent history
 // (newest first); ↑/↓ move, Enter inserts the command into the prompt for review
 // (it is NOT auto-run), Esc closes.
-interface HistEntry { cmd: string; ts: number; count: number }
+interface HistEntry { cmd: string; ts: number; count: number; exit?: number }
 
 function HistoryPalette({ onClose, onPick }: { onClose: () => void; onPick: (cmd: string) => void }) {
   const [query, setQuery] = useState('')
@@ -828,6 +940,13 @@ function HistoryPalette({ onClose, onPick }: { onClose: () => void; onPick: (cmd
                   borderLeft: `2px solid ${i === idx ? 'var(--accent)' : 'transparent'}`
                 }}
               >
+                {typeof it.exit === 'number' && (
+                  <span
+                    className="flex-shrink-0 rounded-full"
+                    style={{ width: 6, height: 6, background: it.exit === 0 ? 'var(--success)' : 'var(--error)' }}
+                    title={`last exit ${it.exit}`}
+                  />
+                )}
                 <span className="flex-1 truncate font-mono text-xs" style={{ color: 'var(--text-primary)' }}>
                   {it.cmd}
                 </span>

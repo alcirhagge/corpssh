@@ -262,6 +262,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <Toggle value={form.terminalAutoColor !== false} onChange={v => set('terminalAutoColor', v)} />
                 </SettingRow>
 
+                <SettingRow label="Shell Integration (Linux)" description="Real command history + exit codes, cwd in tab, SFTP opens at cwd. Per-host override in the host form.">
+                  <Toggle value={form.terminalShellIntegration !== false} onChange={v => set('terminalShellIntegration', v)} />
+                </SettingRow>
+
                 <SettingRow label="Scrollback" description="Number of lines in history">
                   <input
                     type="number"
