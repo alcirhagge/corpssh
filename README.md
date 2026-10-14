@@ -6,6 +6,8 @@ Cliente de acesso remoto desktop (SSH, SFTP, RDP e VNC) com interface moderna: t
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Version](https://img.shields.io/github/v/release/alcirhagge/corpssh)
 
+> **Windows: o CorpSSH continua como [CorpSSH RS](https://github.com/NBN-PATRIC/corpssh-rs-releases/releases/latest)**, mantido pela NBN Telecom (backend em Rust, mais leve e com atualização própria). A versão 1.21.0 é a última do CorpSSH no Windows: ao abrir, ela oferece instalar o CorpSSH RS, que traz os hosts, credenciais, chaves e snippets do `~/.corpssh` e remove o CorpSSH antigo sem apagar dados. macOS e Linux continuam por este repositório.
+
 ---
 
 ## Download
