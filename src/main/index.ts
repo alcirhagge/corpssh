@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import { setupIpcHandlers } from './ipcHandlers'
 import { disconnectAll, hasActiveConnections } from './sshManager'
+import { offerCorpSshRs } from './corpsshRs'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -128,6 +129,8 @@ function createWindow(): void {
     }
     if (!is.dev) {
       setTimeout(() => autoUpdater.checkForUpdates(), 3000)
+      // Windows: CorpSSH continues as CorpSSH RS (see corpsshRs.ts).
+      setTimeout(() => mainWindow && offerCorpSshRs(mainWindow), 1500)
     }
   })
 
